@@ -20,6 +20,8 @@
 
 更多说明见 [LICENSE](LICENSE)、[NOTICE](NOTICE)、[ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md)、[CONTRIBUTING.md](CONTRIBUTING.md)、[CHANGELOG.md](CHANGELOG.md) 和 [SECURITY.md](SECURITY.md)。
 
+命令行参数总表见 [docs/COMMANDS.md](docs/COMMANDS.md)。
+
 ## 一键构建
 
 在线从 PyPI 构建：
@@ -28,6 +30,8 @@
 cd make_ansible_portable
 ./build.sh --source ansible-core==2.15.13 --clean-output
 ```
+
+`--clean-output` 的意思是：如果 `dist/` 里已经有同名的旧目录或旧压缩包，就先删掉再重建；不加这个参数时，遇到同名旧产物会直接报错，避免误覆盖。
 
 从你已经下载好的官方 wheel 构建：
 
@@ -186,6 +190,7 @@ python3 ./ansible-galaxy --version
 - `python/make_ansible_portable/`: Python 实现
 - `templates/__main__.py`: 便携入口模板
 - `examples/`: 常见 extras 示例
+- `docs/COMMANDS.md`: 命令行参数参考
 - `docs/TUTORIAL.md`: 完整教程
 
 ## 许可证

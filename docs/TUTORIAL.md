@@ -32,6 +32,8 @@ python3 --version
 
 ## 3. 最简单的一键构建
 
+完整参数表见 [docs/COMMANDS.md](COMMANDS.md)。
+
 ### 方法 A：直接从 PyPI 构建
 
 ```bash
@@ -398,6 +400,8 @@ ls dist/portable-ansible-core-2.15.13/ansible/extras
 ```bash
 --clean-output
 ```
+
+它的实际作用是：删除当前同名 bundle 目录，以及同名的旧 `tar.gz`、`tar.bz2`、`tar.xz` 包，然后重新构建。
 
 ## 14. 推荐工作流
 
