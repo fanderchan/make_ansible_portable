@@ -51,6 +51,8 @@
 - `--skip-archive`: 只生成目录，不生成 tar 包。
 - `--skip-self-test`: 跳过 `localhost -m ping` 自测。
 - `--strip-metadata`: 删除 `*.dist-info` 和 `*.egg-info`，减小体积，但也可能删掉上游许可证元数据。
+- `--without-vault`: 删除 `ansible-vault` 入口，并裁掉 `cryptography` / `cffi` 运行时依赖链。生成的 bundle 不再支持 vault 加密文件、加密变量或 `ansible-vault` CLI。
+- `--without-yaml-c-extension`: 删除 `yaml/_yaml*.so`，让 `PyYAML` 回退到纯 Python 解析/输出实现。
 - `--python`: 指定构建和自测时使用的 Python 解释器。默认是当前 Python。如果它低于该 Ansible 版本在官方文档里声明的控制机最低 Python 版本，构建会直接失败。
 - `--wheelhouse`: 指定本地 wheel 目录，构建时通过 `pip --find-links` 使用。
 - `--offline`: 不访问 PyPI。通常要配合 `--wheelhouse` 或本地包文件使用。
@@ -91,6 +93,18 @@
 - 所以常见情况下，你不需要手工写 `--build-constraint`。
 - 只有你想覆盖默认锁文件，才显式传 `--build-constraint`。
 - 如果你想彻底禁用这层自动匹配，就传 `--no-auto-build-constraint`。
+
+关于 `--without-vault`：
+
+- 它是“安装完成后按特性裁剪”，不是改官方依赖解析规则。
+- 当前会移除 `cryptography`、`cffi`、`_cffi_backend*.so`，以及这条依赖链带进来的 `pycparser`、`typing_extensions`，并且不再生成 `ansible-vault` 命令入口。
+- 它不会裁掉 `PyYAML`。Ansible 的配置、inventory、playbook、collection 元数据等常规路径都需要 YAML 解析。
+
+关于 `--without-yaml-c-extension`：
+
+- 它只移除 `PyYAML` 的 LibYAML C 扩展共享库 `yaml/_yaml*.so`。
+- 删除后，`PyYAML` 会自动回退到纯 Python 实现，功能还在，只是 YAML 解析/输出速度会慢一些。
+- 它和 `_cffi_backend*.so` 不是同一类东西。后者不是“纯加速器”，只要还保留 `cryptography/cffi`，就不能单独删。
 
 ## `install-extras.sh`
 

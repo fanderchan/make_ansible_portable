@@ -116,6 +116,16 @@ def build_parser():
         action="store_true",
         help="Remove *.dist-info and *.egg-info from the final bundle to reduce size. Warning: this can also remove upstream license metadata from bundled dependencies.",
     )
+    build.add_argument(
+        "--without-vault",
+        action="store_true",
+        help="Omit ansible-vault launcher and prune bundled cryptography/cffi runtime dependencies. Encrypted vars/files and ansible-vault will not work in the resulting bundle.",
+    )
+    build.add_argument(
+        "--without-yaml-c-extension",
+        action="store_true",
+        help="Omit bundled PyYAML C extension shared objects and fall back to pure-Python YAML parsing/emitting.",
+    )
     _add_pip_options(build)
     _add_extras_options(build)
 

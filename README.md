@@ -97,6 +97,20 @@ python3 ./ansible-galaxy --version
 
 `--build-constraint` 的作用不是“切换 Python”，而是锁住主运行依赖版本。比如 `ansible-base 2.10.17` 在 `Python 3.6` 下，实际会装进 bundle 的 `Jinja2`、`PyYAML`、`cryptography` 等版本，都可以通过这个文件固定下来。
 
+如果你明确不需要 `ansible-vault`，还可以在构建时加：
+
+- `--without-vault`：删除便携包里的 `ansible-vault` 入口，并裁掉 `cryptography` / `cffi` 运行时依赖链，换更小体积
+
+这个选项适合“不使用 vault 加密文件、加密变量、ansible-vault CLI”的场景。  
+注意：它不会裁掉 `PyYAML`，因为 YAML 解析是 Ansible 常规运行路径，不只是 vault 在用。
+
+如果你还想进一步减小体积，可以再加：
+
+- `--without-yaml-c-extension`：不打 `yaml/_yaml*.so`，让 `PyYAML` 回退到纯 Python 实现
+
+这个选项通常能再省掉一份 `PyYAML` 的编译版 `.so`。  
+但它和 `cffi` 不是同一类事情：`_cffi_backend*.so` 不是纯加速器，只有配合 `--without-vault` 一起去掉整条依赖链才安全。
+
 如果仓库里已经有匹配的内置锁文件，`build.sh` 现在默认会自动使用它。  
 例如：`ansible-base==2.10.17 + Python 3.6` 会自动匹配 [locks/ansible-base-2.10.17-py36.txt](/usr/local/make_ansible_portable/locks/ansible-base-2.10.17-py36.txt)。
 
@@ -132,6 +146,17 @@ python3 ./ansible-galaxy --version
 ./build.sh \
   --python /usr/bin/python3 \
   --source ansible-base==2.10.17 \
+  --clean-output
+```
+
+如果你的目标是尽量减小 `2.10.17` 绿色包体积，并且确认不需要 vault：
+
+```bash
+./build.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --without-vault \
+  --without-yaml-c-extension \
   --clean-output
 ```
 

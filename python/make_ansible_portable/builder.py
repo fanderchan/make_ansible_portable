@@ -38,6 +38,10 @@ FALLBACK_COMMANDS = [
     "ansible-pull",
     "ansible-vault",
 ]
+VAULT_COMMAND = "ansible-vault"
+VAULT_RUNTIME_DISTRIBUTIONS = ("cryptography", "cffi", "pycparser", "typing-extensions")
+VAULT_RUNTIME_PATHS = ("cryptography", "cffi", "pycparser", "typing_extensions.py", "_cffi_backend*.so")
+YAML_C_EXTENSION_PATTERNS = ("yaml/_yaml*.so",)
 
 
 class BuildError(RuntimeError):
@@ -172,21 +176,7 @@ def _venv_python_path(venv_dir):
 
 
 def _probe_packaging_tool_versions(python_bin):
-    cmd = [
-        python_bin,
-        "-c",
-        (
-            "import json; "
-            "import pip; "
-            "import setuptools; "
-            "import wheel; "
-            "print(json.dumps({"
-            "'pip': pip.__version__, "
-            "'setuptools': setuptools.__version__, "
-            "'wheel': wheel.__version__"
-            "}))"
-        ),
-    ]
+    cmd = [python_bin, "-m", "pip", "show", "pip", "setuptools", "wheel"]
     try:
         completed = subprocess.run(
             cmd,
@@ -197,7 +187,29 @@ def _probe_packaging_tool_versions(python_bin):
         )
     except subprocess.CalledProcessError as exc:
         raise BuildError("Failed to inspect build tool versions for {}".format(python_bin)) from exc
-    return json.loads(completed.stdout)
+
+    versions = {}
+    current_name = None
+    for raw_line in completed.stdout.splitlines():
+        if raw_line.startswith("Name: "):
+            current_name = raw_line.split(":", 1)[1].strip().lower()
+            continue
+        if raw_line.startswith("Version: ") and current_name:
+            versions[current_name] = raw_line.split(":", 1)[1].strip()
+            current_name = None
+
+    missing = [name for name in ("pip", "setuptools", "wheel") if name not in versions]
+    if missing:
+        raise BuildError(
+            "Failed to inspect build tool versions for {} (missing: {})".format(
+                python_bin, ", ".join(missing)
+            )
+        )
+    return {
+        "pip": versions["pip"],
+        "setuptools": versions["setuptools"],
+        "wheel": versions["wheel"],
+    }
 
 
 def _build_tool_metadata_path(cache_dir):
@@ -352,6 +364,10 @@ def _sanitize_name(value):
     while "--" in result:
         result = result.replace("--", "-")
     return result.strip("-")
+
+
+def _normalize_distribution_name(value):
+    return re.sub(r"[-_.]+", "-", value).lower()
 
 
 SPECIFIER_RE = re.compile(r"^(<=|>=|==|!=|<|>|~=)\s*([0-9]+(?:\.[0-9]+){0,2})(\.\*)?$")
@@ -766,7 +782,7 @@ def _discover_ansible_commands(ansible_dir):
     return commands or FALLBACK_COMMANDS
 
 
-def _write_quickstart(bundle_dir, commands, metadata):
+def _write_quickstart(bundle_dir, commands, metadata, without_vault=False, without_yaml_c_extension=False):
     quickstart = bundle_dir / "QUICKSTART.txt"
     lines = [
         "Portable Ansible Quickstart",
@@ -781,6 +797,22 @@ def _write_quickstart(bundle_dir, commands, metadata):
         "Installed command aliases:",
     ]
     lines.extend(f"  {command}" for command in commands)
+    if without_vault:
+        lines.extend(
+            [
+                "",
+                "Vault support was omitted at build time.",
+                "Encrypted vars/files and the ansible-vault command are unavailable in this bundle.",
+            ]
+        )
+    if without_yaml_c_extension:
+        lines.extend(
+            [
+                "",
+                "PyYAML LibYAML C extension was omitted at build time.",
+                "YAML parsing/emitting falls back to the pure-Python implementation.",
+            ]
+        )
     lines.extend(
         [
             "",
@@ -862,6 +894,36 @@ def _prune_bundle(ansible_dir, strip_metadata):
             _remove_matching(ansible_dir, pattern)
 
 
+def _remove_distribution_metadata(ansible_dir, distribution_names):
+    normalized_targets = {_normalize_distribution_name(name) for name in distribution_names}
+    metadata_paths = sorted(ansible_dir.glob("*.dist-info")) + sorted(ansible_dir.glob("*.egg-info"))
+    for metadata_path in metadata_paths:
+        if metadata_path.suffix == ".dist-info" and not (metadata_path / "METADATA").exists():
+            continue
+        if metadata_path.suffix == ".egg-info" and not (metadata_path / "PKG-INFO").exists():
+            continue
+        distribution_name, _version = _read_metadata_version(metadata_path)
+        if distribution_name and _normalize_distribution_name(distribution_name) in normalized_targets:
+            shutil.rmtree(metadata_path)
+
+
+def _prune_vault_runtime(ansible_dir):
+    for relative_pattern in VAULT_RUNTIME_PATHS:
+        _remove_matching(ansible_dir, relative_pattern)
+    _remove_distribution_metadata(ansible_dir, VAULT_RUNTIME_DISTRIBUTIONS)
+
+
+def _prune_yaml_c_extension(ansible_dir):
+    for relative_pattern in YAML_C_EXTENSION_PATTERNS:
+        _remove_matching(ansible_dir, relative_pattern)
+
+
+def _filter_bundle_commands(commands, without_vault):
+    if not without_vault:
+        return commands
+    return [command for command in commands if command != VAULT_COMMAND]
+
+
 def _write_manifest(
     bundle_dir,
     metadata,
@@ -871,6 +933,7 @@ def _write_manifest(
     build_python_tools,
     build_extras,
     installed_distributions,
+    build_options,
 ):
     manifest_path = bundle_dir / MANIFEST_FILE
     manifest = {
@@ -886,6 +949,7 @@ def _write_manifest(
             "version_info": python_info["version_info"],
         },
         "build_python_tools": build_python_tools,
+        "build_options": build_options,
         "bundle": {
             "name": bundle_dir.name,
             "commands": commands,
@@ -1012,6 +1076,10 @@ def build_portable_bundle(args):
             offline=args.offline,
         )
         _compile_launcher(args.python, ansible_dir)
+        if args.without_vault:
+            _prune_vault_runtime(ansible_dir)
+        if args.without_yaml_c_extension:
+            _prune_yaml_c_extension(ansible_dir)
 
         if args.extra_package or args.extra_requirements:
             _install_with_pip(
@@ -1024,10 +1092,16 @@ def build_portable_bundle(args):
                 offline=args.offline,
             )
 
-        commands = _discover_ansible_commands(ansible_dir)
+        commands = _filter_bundle_commands(_discover_ansible_commands(ansible_dir), args.without_vault)
         installed_distributions = _collect_installed_distributions(ansible_dir)
         _create_command_symlinks(stage_root, commands)
-        _write_quickstart(stage_root, commands, metadata)
+        _write_quickstart(
+            stage_root,
+            commands,
+            metadata,
+            without_vault=args.without_vault,
+            without_yaml_c_extension=args.without_yaml_c_extension,
+        )
         _write_bundle_notices(stage_root, metadata)
         manifest_path = _write_manifest(
             bundle_dir=stage_root,
@@ -1048,6 +1122,13 @@ def build_portable_bundle(args):
                 "constraint_file": str(args.constraint) if args.constraint else None,
             },
             installed_distributions=installed_distributions,
+            build_options={
+                "without_vault": bool(args.without_vault),
+                "without_yaml_c_extension": bool(args.without_yaml_c_extension),
+                "omitted_commands": [VAULT_COMMAND] if args.without_vault else [],
+                "omitted_runtime_distributions": list(VAULT_RUNTIME_DISTRIBUTIONS) if args.without_vault else [],
+                "omitted_runtime_paths": list(YAML_C_EXTENSION_PATTERNS) if args.without_yaml_c_extension else [],
+            },
         )
         _prune_bundle(ansible_dir, strip_metadata=args.strip_metadata)
         shutil.move(str(stage_root), str(bundle_dir))

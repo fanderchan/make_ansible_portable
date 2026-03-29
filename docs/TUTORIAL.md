@@ -67,6 +67,18 @@ python3 --version
 
 例如 `ansible-base 2.10.17` 在 `Python 3.6` 下，真正会装进 bundle 的 `Jinja2`、`PyYAML`、`cryptography` 等版本，都属于 `--build-constraint` 管的范围。
 
+如果你确认完全不用 vault，可以在构建时额外加 `--without-vault`：
+
+- 删除 `ansible-vault` 命令入口
+- 裁掉 `cryptography` / `cffi` 依赖链，包括 `_cffi_backend*.so`
+- 保留 `PyYAML`，因为 YAML 解析属于 Ansible 常规能力，不只是 vault 在用
+
+如果你还想把 `PyYAML` 的编译版 `.so` 去掉，可以再加 `--without-yaml-c-extension`：
+
+- 删除 `yaml/_yaml*.so`
+- `PyYAML` 自动回退到纯 Python 实现
+- 会慢一点，但一般功能不受影响
+
 但日常使用时，你通常不用手工写它。`build.sh` 现在会自动去 `locks/` 目录里找匹配当前 `--source + --python` 的内置锁文件。
 
 最常见用法：
@@ -75,6 +87,17 @@ python3 --version
 ./build.sh \
   --python /usr/bin/python3.6 \
   --source ansible-base==2.10.17 \
+  --clean-output
+```
+
+如果你要做更小的无 vault 版：
+
+```bash
+./build.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --without-vault \
+  --without-yaml-c-extension \
   --clean-output
 ```
 
@@ -423,6 +446,8 @@ python3 -m pip download -d /tmp/wheelhouse -r examples/extras-k8s.txt
 - `--skip-archive`: 只生成目录，不打 tar 包
 - `--skip-self-test`: 跳过 localhost 自测
 - `--strip-metadata`: 删除 `*.dist-info` / `*.egg-info`，减小体积，但也可能删掉上游许可证元数据。公开分发产物前要谨慎使用
+- `--without-vault`: 删除 `ansible-vault` 入口，并裁掉 `cryptography` / `cffi` 运行时依赖链
+- `--without-yaml-c-extension`: 删除 `yaml/_yaml*.so`，让 `PyYAML` 回退到纯 Python 实现
 - `--wheelhouse`: 本地 wheel 目录
 - `--offline`: 禁止访问 PyPI
 - `--extra-package`: 额外 Python 包，可重复
