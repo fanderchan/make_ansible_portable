@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import configparser
 import email
 import json
@@ -14,9 +12,9 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from . import TOOL_NAME, TOOL_VERSION
 from .controller_support import lookup_controller_support
@@ -45,21 +43,34 @@ class BuildError(RuntimeError):
     pass
 
 
-@dataclass
-class SourceMetadata:
-    input_source: str
-    artifact_path: Path
-    package_name: str
-    version: str
-    requires_python: str
-    runtime_requirements: list[str]
-    official_controller_min_python: str = ""
-    official_controller_support: str = ""
-    official_controller_support_url: str = ""
-    official_controller_support_note: str = ""
-    official_controller_support_note_url: str = ""
+class SourceMetadata(object):
+    def __init__(
+        self,
+        input_source,
+        artifact_path,
+        package_name,
+        version,
+        requires_python,
+        runtime_requirements,
+        official_controller_min_python="",
+        official_controller_support="",
+        official_controller_support_url="",
+        official_controller_support_note="",
+        official_controller_support_note_url="",
+    ):
+        self.input_source = input_source
+        self.artifact_path = artifact_path
+        self.package_name = package_name
+        self.version = version
+        self.requires_python = requires_python
+        self.runtime_requirements = runtime_requirements
+        self.official_controller_min_python = official_controller_min_python
+        self.official_controller_support = official_controller_support
+        self.official_controller_support_url = official_controller_support_url
+        self.official_controller_support_note = official_controller_support_note
+        self.official_controller_support_note_url = official_controller_support_note_url
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self):
         source_path = Path(self.input_source).expanduser()
         return {
             "input_source": self.input_source,
@@ -79,27 +90,27 @@ class SourceMetadata:
         }
 
 
-@dataclass
-class BuildResult:
-    bundle_dir: Path
-    archive_path: Path | None
-    manifest_path: Path
+class BuildResult(object):
+    def __init__(self, bundle_dir, archive_path, manifest_path):
+        self.bundle_dir = bundle_dir
+        self.archive_path = archive_path
+        self.manifest_path = manifest_path
 
 
-@dataclass
-class ExtrasInstallResult:
-    extras_dir: Path
-    manifest_path: Path
+class ExtrasInstallResult(object):
+    def __init__(self, extras_dir, manifest_path):
+        self.extras_dir = extras_dir
+        self.manifest_path = manifest_path
 
 
-@dataclass
-class FreezeLockResult:
-    lock_path: Path
-    source: SourceMetadata
-    python: dict[str, object]
+class FreezeLockResult(object):
+    def __init__(self, lock_path, source, python):
+        self.lock_path = lock_path
+        self.source = source
+        self.python = python
 
 
-def _python_info(python_bin: str) -> dict[str, object]:
+def _python_info(python_bin):
     cmd = [
         python_bin,
         "-c",
@@ -112,25 +123,31 @@ def _python_info(python_bin: str) -> dict[str, object]:
         ),
     ]
     try:
-        completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
+        completed = subprocess.run(
+            cmd,
+            check=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
     except subprocess.CalledProcessError as exc:
         raise BuildError(f"Failed to inspect Python interpreter: {python_bin}") from exc
     return json.loads(completed.stdout)
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None) -> None:
+def _run(cmd, cwd=None):
     try:
         subprocess.run(
             cmd,
             cwd=str(cwd) if cwd else None,
             check=True,
-            text=True,
+            universal_newlines=True,
         )
     except subprocess.CalledProcessError as exc:
         raise BuildError(f"Command failed ({exc.returncode}): {' '.join(cmd)}") from exc
 
 
-def _sanitize_name(value: str) -> str:
+def _sanitize_name(value):
     chars = []
     for ch in value.lower():
         if ch.isalnum():
@@ -148,19 +165,19 @@ EXACT_PYPI_SPEC_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*==\s*([0-9]+(?:\.[0-9]
 PYPI_RELEASE_JSON = "https://pypi.org/pypi/{package}/{version}/json"
 
 
-def _normalize_version(value: str) -> tuple[int, int, int]:
+def _normalize_version(value):
     parts = [int(part) for part in value.split(".") if part]
     while len(parts) < 3:
         parts.append(0)
     return tuple(parts[:3])
 
 
-def _compare_tuple_prefix(left: tuple[int, int, int], right_text: str) -> bool:
+def _compare_tuple_prefix(left, right_text):
     raw_parts = [int(part) for part in right_text.split(".") if part]
     return tuple(left[: len(raw_parts)]) == tuple(raw_parts)
 
 
-def _version_matches_spec(version: tuple[int, int, int], requires_python: str) -> bool:
+def _version_matches_spec(version, requires_python):
     spec_text = requires_python.strip()
     if not spec_text:
         return True
@@ -212,7 +229,7 @@ def _version_matches_spec(version: tuple[int, int, int], requires_python: str) -
     return True
 
 
-def _fetch_json(url: str) -> dict[str, object]:
+def _fetch_json(url):
     request = urllib.request.Request(
         url,
         headers={
@@ -227,7 +244,7 @@ def _fetch_json(url: str) -> dict[str, object]:
         raise BuildError(f"Failed to fetch {url}: {exc}") from exc
 
 
-def _exact_pypi_release_requires_python(source: str) -> tuple[str, str, str] | None:
+def _exact_pypi_release_requires_python(source):
     match = EXACT_PYPI_SPEC_RE.match(source)
     if not match:
         return None
@@ -241,7 +258,7 @@ def _exact_pypi_release_requires_python(source: str) -> tuple[str, str, str] | N
     return package, version, requires_python
 
 
-def _normalize_source_alias(source: str) -> str:
+def _normalize_source_alias(source):
     stripped = source.strip()
 
     exact_210 = re.fullmatch(r"(?i)(ansible[-_]core)\s*==\s*(2\.10(?:\.\d+)?)", stripped)
@@ -258,14 +275,7 @@ def _normalize_source_alias(source: str) -> str:
     return source
 
 
-def _download_artifact(
-    source: str,
-    *,
-    python_bin: str,
-    download_dir: Path,
-    wheelhouse: Path | None,
-    offline: bool,
-) -> Path:
+def _download_artifact(source, python_bin, download_dir, wheelhouse, offline):
     download_dir.mkdir(parents=True, exist_ok=True)
     before = {item.name for item in download_dir.iterdir()}
     cmd = [python_bin, "-m", "pip", "download", "--no-deps", "--dest", str(download_dir)]
@@ -283,7 +293,7 @@ def _download_artifact(
     return after[0]
 
 
-def _read_member_from_tar(artifact: Path, member_suffix: str) -> str | None:
+def _read_member_from_tar(artifact, member_suffix):
     with tarfile.open(artifact, "r:*") as archive:
         for member in archive.getmembers():
             if member.name.endswith(member_suffix) and member.isfile():
@@ -294,7 +304,7 @@ def _read_member_from_tar(artifact: Path, member_suffix: str) -> str | None:
     return None
 
 
-def _read_member_from_zip(artifact: Path, member_suffix: str) -> str | None:
+def _read_member_from_zip(artifact, member_suffix):
     with zipfile.ZipFile(artifact) as archive:
         for member in archive.namelist():
             if member.endswith(member_suffix):
@@ -302,12 +312,12 @@ def _read_member_from_zip(artifact: Path, member_suffix: str) -> str | None:
     return None
 
 
-def _parse_email_metadata(raw_text: str) -> email.message.Message:
+def _parse_email_metadata(raw_text):
     return email.message_from_string(raw_text)
 
 
-def _parse_requirements_text(raw_text: str) -> list[str]:
-    requirements: list[str] = []
+def _parse_requirements_text(raw_text):
+    requirements = []
     for raw_line in raw_text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -316,7 +326,7 @@ def _parse_requirements_text(raw_text: str) -> list[str]:
     return requirements
 
 
-def _read_metadata_version(metadata_path: Path) -> tuple[str | None, str | None]:
+def _read_metadata_version(metadata_path):
     if metadata_path.suffix == ".dist-info":
         raw_text = (metadata_path / "METADATA").read_text(encoding="utf-8", errors="replace")
     else:
@@ -325,8 +335,8 @@ def _read_metadata_version(metadata_path: Path) -> tuple[str | None, str | None]
     return message.get("Name"), message.get("Version")
 
 
-def _collect_installed_distributions(ansible_dir: Path) -> list[dict[str, str]]:
-    distributions: list[dict[str, str]] = []
+def _collect_installed_distributions(ansible_dir):
+    distributions = []
     for metadata_path in sorted(ansible_dir.glob("*.dist-info")) + sorted(ansible_dir.glob("*.egg-info")):
         if metadata_path.suffix == ".dist-info" and not (metadata_path / "METADATA").exists():
             continue
@@ -346,7 +356,7 @@ def _collect_installed_distributions(ansible_dir: Path) -> list[dict[str, str]]:
     return distributions
 
 
-def _inspect_wheel(artifact: Path, input_source: str) -> SourceMetadata:
+def _inspect_wheel(artifact, input_source):
     with zipfile.ZipFile(artifact) as archive:
         metadata_name = next(
             (name for name in archive.namelist() if name.endswith(".dist-info/METADATA")),
@@ -365,7 +375,7 @@ def _inspect_wheel(artifact: Path, input_source: str) -> SourceMetadata:
     )
 
 
-def _inspect_sdist(artifact: Path, input_source: str) -> SourceMetadata:
+def _inspect_sdist(artifact, input_source):
     if zipfile.is_zipfile(artifact):
         pkg_info = _read_member_from_zip(artifact, "/PKG-INFO")
         requirements_txt = _read_member_from_zip(artifact, "/requirements.txt")
@@ -391,7 +401,7 @@ def _inspect_sdist(artifact: Path, input_source: str) -> SourceMetadata:
     )
 
 
-def _inspect_artifact(artifact: Path, input_source: str) -> SourceMetadata:
+def _inspect_artifact(artifact, input_source):
     if artifact.suffix == ".whl":
         return _inspect_wheel(artifact, input_source)
     if artifact.suffix in {".zip", ".gz", ".bz2", ".xz"} or artifact.name.endswith(".tar.gz") or artifact.name.endswith(".tar.bz2") or artifact.name.endswith(".tar.xz"):
@@ -399,7 +409,7 @@ def _inspect_artifact(artifact: Path, input_source: str) -> SourceMetadata:
     raise BuildError(f"Unsupported artifact type: {artifact}")
 
 
-def _apply_official_controller_support(metadata: SourceMetadata) -> SourceMetadata:
+def _apply_official_controller_support(metadata):
     support = lookup_controller_support(metadata.package_name, metadata.version)
     if support is None:
         return metadata
@@ -411,13 +421,7 @@ def _apply_official_controller_support(metadata: SourceMetadata) -> SourceMetada
     return metadata
 
 
-def inspect_source(
-    *,
-    source: str,
-    python_bin: str,
-    wheelhouse: Path | None,
-    offline: bool,
-) -> SourceMetadata:
+def inspect_source(source, python_bin, wheelhouse, offline):
     return _resolve_source_metadata(
         source=source,
         python_bin=python_bin,
@@ -427,14 +431,7 @@ def inspect_source(
     )
 
 
-def _resolve_source_metadata(
-    *,
-    source: str,
-    python_bin: str,
-    wheelhouse: Path | None,
-    offline: bool,
-    download_dir: Path | None,
-) -> SourceMetadata:
+def _resolve_source_metadata(source, python_bin, wheelhouse, offline, download_dir):
     source_path = Path(source).expanduser()
     if source_path.exists():
         artifact = source_path.resolve()
@@ -495,7 +492,7 @@ def _resolve_source_metadata(
     return _apply_official_controller_support(_inspect_artifact(artifact, source))
 
 
-def _validate_python_for_source(metadata: SourceMetadata, python_bin: str) -> dict[str, object]:
+def _validate_python_for_source(metadata, python_bin):
     python_info = _python_info(python_bin)
     version_info = python_info["version_info"]
     version_tuple = (int(version_info[0]), int(version_info[1]), int(version_info[2]))
@@ -533,15 +530,14 @@ def _validate_python_for_source(metadata: SourceMetadata, python_bin: str) -> di
 
 
 def _install_with_pip(
-    *,
-    python_bin: str,
-    target: Path,
-    packages: list[str] | None = None,
-    requirement_files: list[Path] | None = None,
-    constraint_file: Path | None = None,
-    wheelhouse: Path | None = None,
-    offline: bool,
-) -> None:
+    python_bin,
+    target,
+    packages=None,
+    requirement_files=None,
+    constraint_file=None,
+    wheelhouse=None,
+    offline=False,
+):
     packages = packages or []
     requirement_files = requirement_files or []
     if not packages and not requirement_files:
@@ -560,7 +556,7 @@ def _install_with_pip(
     _run(cmd)
 
 
-def _discover_ansible_commands(ansible_dir: Path) -> list[str]:
+def _discover_ansible_commands(ansible_dir):
     entry_points = sorted(ansible_dir.glob("*.dist-info/entry_points.txt"))
     if not entry_points:
         entry_points = sorted(ansible_dir.glob("*.egg-info/entry_points.txt"))
@@ -575,7 +571,7 @@ def _discover_ansible_commands(ansible_dir: Path) -> list[str]:
     return commands or FALLBACK_COMMANDS
 
 
-def _write_quickstart(bundle_dir: Path, commands: list[str], metadata: SourceMetadata) -> None:
+def _write_quickstart(bundle_dir, commands, metadata):
     quickstart = bundle_dir / "QUICKSTART.txt"
     lines = [
         "Portable Ansible Quickstart",
@@ -604,7 +600,7 @@ def _write_quickstart(bundle_dir: Path, commands: list[str], metadata: SourceMet
     quickstart.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_bundle_notices(bundle_dir: Path, metadata: SourceMetadata) -> None:
+def _write_bundle_notices(bundle_dir, metadata):
     if PROJECT_LICENSE.exists():
         shutil.copy2(PROJECT_LICENSE, bundle_dir / "LICENSE")
     if PROJECT_NOTICE.exists():
@@ -635,7 +631,7 @@ def _write_bundle_notices(bundle_dir: Path, metadata: SourceMetadata) -> None:
     notices.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _create_command_symlinks(bundle_dir: Path, commands: list[str]) -> None:
+def _create_command_symlinks(bundle_dir, commands):
     for command in commands:
         if command == "ansible":
             continue
@@ -645,7 +641,7 @@ def _create_command_symlinks(bundle_dir: Path, commands: list[str]) -> None:
         os.symlink("ansible", link)
 
 
-def _remove_matching(root: Path, pattern: str) -> None:
+def _remove_matching(root, pattern):
     for path in root.rglob(pattern):
         if path.is_dir():
             shutil.rmtree(path)
@@ -653,7 +649,7 @@ def _remove_matching(root: Path, pattern: str) -> None:
             path.unlink()
 
 
-def _prune_bundle(ansible_dir: Path, *, strip_metadata: bool) -> None:
+def _prune_bundle(ansible_dir, strip_metadata):
     _remove_matching(ansible_dir, "__pycache__")
     for file_path in ansible_dir.rglob("*.pyc"):
         file_path.unlink()
@@ -672,15 +668,14 @@ def _prune_bundle(ansible_dir: Path, *, strip_metadata: bool) -> None:
 
 
 def _write_manifest(
-    *,
-    bundle_dir: Path,
-    metadata: SourceMetadata,
-    commands: list[str],
-    python_bin: str,
-    python_info: dict[str, object],
-    build_extras: dict[str, object],
-    installed_distributions: list[dict[str, str]],
-) -> Path:
+    bundle_dir,
+    metadata,
+    commands,
+    python_bin,
+    python_info,
+    build_extras,
+    installed_distributions,
+):
     manifest_path = bundle_dir / MANIFEST_FILE
     manifest = {
         "builder": {
@@ -708,25 +703,25 @@ def _write_manifest(
     return manifest_path
 
 
-def _load_manifest(manifest_path: Path) -> dict[str, object]:
+def _load_manifest(manifest_path):
     if not manifest_path.exists():
         raise BuildError(f"Missing manifest file: {manifest_path}")
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
-def _save_manifest(manifest_path: Path, manifest: dict[str, object]) -> None:
+def _save_manifest(manifest_path, manifest):
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
 
-def _compile_launcher(python_bin: str, ansible_dir: Path) -> None:
+def _compile_launcher(python_bin, ansible_dir):
     py_compile.compile(str(ansible_dir / "__main__.py"), doraise=True)
 
 
-def _self_test_bundle(python_bin: str, bundle_dir: Path) -> None:
+def _self_test_bundle(python_bin, bundle_dir):
     _run([python_bin, str(bundle_dir / "ansible"), "localhost", "-m", "ping"])
 
 
-def _create_archive(bundle_dir: Path, compression: str) -> Path:
+def _create_archive(bundle_dir, compression):
     suffix = {
         "bz2": ".tar.bz2",
         "gz": ".tar.gz",
@@ -743,7 +738,7 @@ def _create_archive(bundle_dir: Path, compression: str) -> Path:
     return archive_path
 
 
-def _write_lock_file(lock_path: Path, metadata: SourceMetadata, python_info: dict[str, object], installed_distributions: list[dict[str, str]]) -> None:
+def _write_lock_file(lock_path, metadata, python_info, installed_distributions):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"# Lock file for {metadata.package_name} {metadata.version}",
@@ -756,7 +751,7 @@ def _write_lock_file(lock_path: Path, metadata: SourceMetadata, python_info: dic
     lock_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def build_portable_bundle(args) -> BuildResult:
+def build_portable_bundle(args):
     with tempfile.TemporaryDirectory(prefix="portable-build-") as temp_dir:
         temp_root = Path(temp_dir)
         metadata = _resolve_source_metadata(
@@ -858,7 +853,7 @@ def build_portable_bundle(args) -> BuildResult:
     )
 
 
-def freeze_build_lock(args) -> FreezeLockResult:
+def freeze_build_lock(args):
     with tempfile.TemporaryDirectory(prefix="portable-lock-") as temp_dir:
         temp_root = Path(temp_dir)
         metadata = _resolve_source_metadata(
@@ -891,7 +886,7 @@ def freeze_build_lock(args) -> FreezeLockResult:
         )
 
 
-def _bundle_paths(bundle_dir: Path) -> tuple[Path, Path, Path]:
+def _bundle_paths(bundle_dir):
     bundle_root = bundle_dir.resolve()
     ansible_dir = bundle_root / "ansible"
     extras_dir = ansible_dir / "extras"
@@ -902,7 +897,7 @@ def _bundle_paths(bundle_dir: Path) -> tuple[Path, Path, Path]:
     return ansible_dir, extras_dir, manifest_path
 
 
-def install_bundle_extras(args) -> ExtrasInstallResult:
+def install_bundle_extras(args):
     bundle_dir = args.bundle.resolve()
     _, extras_dir, manifest_path = _bundle_paths(bundle_dir)
 

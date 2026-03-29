@@ -1,9 +1,8 @@
-from __future__ import annotations
-
 import argparse
 import json
 import sys
 from pathlib import Path
+from typing import List, Optional
 
 from .builder import (
     BuildError,
@@ -12,10 +11,9 @@ from .builder import (
     inspect_source,
     install_bundle_extras,
 )
-from .matrix import refresh_tested_matrix
 
 
-def _add_pip_options(parser: argparse.ArgumentParser) -> None:
+def _add_pip_options(parser):
     parser.add_argument(
         "--python",
         default=sys.executable,
@@ -33,7 +31,7 @@ def _add_pip_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_extras_options(parser: argparse.ArgumentParser) -> None:
+def _add_extras_options(parser):
     parser.add_argument(
         "--extra-package",
         action="append",
@@ -54,12 +52,13 @@ def _add_extras_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser():
     parser = argparse.ArgumentParser(
         prog="make_ansible_portable",
         description="Build a self-contained portable Ansible bundle from an official package.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.required = True
 
     build = subparsers.add_parser(
         "build",
@@ -231,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -281,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "refresh-tested-matrix":
+            from .matrix import refresh_tested_matrix
+
             result = refresh_tested_matrix(args)
             passed = sum(1 for entry in result.entries if entry.status == "已测通过")
             print(f"README:            {result.readme_path}")
