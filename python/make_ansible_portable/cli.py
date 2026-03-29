@@ -107,6 +107,11 @@ def build_parser():
         help="Optional pip constraints file applied when installing the main Ansible/runtime dependencies.",
     )
     build.add_argument(
+        "--no-auto-build-constraint",
+        action="store_true",
+        help="Do not auto-apply a built-in lock file from ./locks when one matches --source and --python.",
+    )
+    build.add_argument(
         "--strip-metadata",
         action="store_true",
         help="Remove *.dist-info and *.egg-info from the final bundle to reduce size. Warning: this can also remove upstream license metadata from bundled dependencies.",
@@ -217,9 +222,8 @@ def build_parser():
     )
     freeze.add_argument(
         "--output",
-        required=True,
         type=Path,
-        help="Output constraints file path.",
+        help="Optional output constraints file path. Default: ./locks/<package>-<version>-pyXY.txt",
     )
     freeze.add_argument(
         "--build-constraint",

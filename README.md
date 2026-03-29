@@ -97,6 +97,9 @@ python3 ./ansible-galaxy --version
 
 `--build-constraint` 的作用不是“切换 Python”，而是锁住主运行依赖版本。比如 `ansible-base 2.10.17` 在 `Python 3.6` 下，实际会装进 bundle 的 `Jinja2`、`PyYAML`、`cryptography` 等版本，都可以通过这个文件固定下来。
 
+如果仓库里已经有匹配的内置锁文件，`build.sh` 现在默认会自动使用它。  
+例如：`ansible-base==2.10.17 + Python 3.6` 会自动匹配 [locks/ansible-base-2.10.17-py36.txt](/usr/local/make_ansible_portable/locks/ansible-base-2.10.17-py36.txt)。
+
 当前工具支持指定构建使用的 Python：
 
 ```bash
@@ -115,6 +118,7 @@ python3 ./ansible-galaxy --version
 - 默认不再依赖系统里旧的 `pip/setuptools/wheel`
 - 会按你传入的 `--python` 自动准备兼容版本
 - 对 `Python 3.6`，会自动使用兼容组合，避免 `cryptography` 退回源码编译
+- 目前只有 `Python 3.6` 做了显式兼容固定；其他 Python 版本默认安装该解释器还能用的最新 `pip/setuptools/wheel`
 
 如果你想单独预热或排查这一层，可以执行：
 
@@ -122,13 +126,36 @@ python3 ./ansible-galaxy --version
 ./prepare-build-python.sh --python /usr/bin/python3
 ```
 
-如果你想让结果可复现，而不是每次都装“当天最新但仍兼容”的依赖版本，就先生成锁文件，再按锁构建：
+所以更推荐的日常用法其实是：
+
+```bash
+./build.sh \
+  --python /usr/bin/python3 \
+  --source ansible-base==2.10.17 \
+  --clean-output
+```
+
+只要你的 `python3` 是 `3.6.x`，并且仓库里已经有对应内置锁文件，工具就会自动应用，不需要你手工再写 `--build-constraint`。
+
+如果你明确不想用内置锁文件，才加：
+
+```bash
+./build.sh \
+  --python /usr/bin/python3 \
+  --source ansible-base==2.10.17 \
+  --no-auto-build-constraint \
+  --clean-output
+```
+
+如果你想自己生成或更新锁文件，再这样做：
 
 ```bash
 ./freeze-build-lock.sh \
   --python /usr/bin/python3.6 \
-  --source ansible-base==2.10.17 \
-  --output locks/ansible-base-2.10.17-py36.txt
+  --source ansible-base==2.10.17
+
+# 默认会生成到:
+# ./locks/ansible-base-2.10.17-py36.txt
 
 ./build.sh \
   --python /usr/bin/python3.6 \
@@ -136,6 +163,8 @@ python3 ./ansible-galaxy --version
   --build-constraint locks/ansible-base-2.10.17-py36.txt \
   --clean-output
 ```
+
+只有你想把锁文件输出到别的位置，才额外传 `--output`。
 
 构建完成后，便携包根目录的 `portable-manifest.json` 会记录：
 

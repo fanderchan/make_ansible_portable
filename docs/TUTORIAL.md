@@ -67,7 +67,9 @@ python3 --version
 
 例如 `ansible-base 2.10.17` 在 `Python 3.6` 下，真正会装进 bundle 的 `Jinja2`、`PyYAML`、`cryptography` 等版本，都属于 `--build-constraint` 管的范围。
 
-例子：
+但日常使用时，你通常不用手工写它。`build.sh` 现在会自动去 `locks/` 目录里找匹配当前 `--source + --python` 的内置锁文件。
+
+最常见用法：
 
 ```bash
 ./build.sh \
@@ -76,11 +78,14 @@ python3 --version
   --clean-output
 ```
 
+如果仓库里已经有 `locks/ansible-base-2.10.17-py36.txt`，上面这条命令会自动用它。
+
 从当前版本开始，`build.sh` 还会自动先准备一个隔离的构建工具环境：
 
 - 自动准备兼容的 `pip/setuptools/wheel`
 - 不再依赖系统自带的老 `pip`
 - 对 CentOS 7.5 这种 `Python 3.6 + pip 9` 的机器，能自动规避 `cryptography` 退回源码编译的问题
+- 目前只有 `Python 3.6` 做了显式兼容固定；其他 Python 版本默认安装该解释器还能用的最新 `pip/setuptools/wheel`
 
 如果你想先单独做这一层准备，可以执行：
 
@@ -88,19 +93,24 @@ python3 --version
 ./prepare-build-python.sh --python /usr/bin/python3.6
 ```
 
-如果你还想把依赖版本锁住，让以后重打时结果不漂移，建议改成两步：
+如果你想自己生成或更新锁文件，再改成两步：
 
 ```bash
 ./freeze-build-lock.sh \
   --python /usr/bin/python3.6 \
-  --source ansible-base==2.10.17 \
-  --output locks/ansible-base-2.10.17-py36.txt
+  --source ansible-base==2.10.17
 
 ./build.sh \
   --python /usr/bin/python3.6 \
   --source ansible-base==2.10.17 \
   --build-constraint locks/ansible-base-2.10.17-py36.txt \
   --clean-output
+```
+
+第一步如果不写 `--output`，默认就会写到：
+
+```bash
+locks/ansible-base-2.10.17-py36.txt
 ```
 
 构建完成后，可以查看：

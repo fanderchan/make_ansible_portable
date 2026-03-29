@@ -47,6 +47,7 @@
 - `--compression`: 压缩格式，可选 `gz`、`bz2`、`xz`。默认是 `gz`。
 - `--clean-output`: 如果输出目录里已经存在同名 bundle 目录，或者存在同名的旧压缩包，就先删除再重建。
 - `--build-constraint`: 主 Ansible/runtime 依赖安装时使用的 pip constraints 文件，用来实现可复现构建。
+- `--no-auto-build-constraint`: 即使仓库 `locks/` 里有匹配当前 `--source + --python` 的内置锁文件，也不要自动使用。
 - `--skip-archive`: 只生成目录，不生成 tar 包。
 - `--skip-self-test`: 跳过 `localhost -m ping` 自测。
 - `--strip-metadata`: 删除 `*.dist-info` 和 `*.egg-info`，减小体积，但也可能删掉上游许可证元数据。
@@ -74,6 +75,7 @@
 - `build.sh` 现在会先自动准备一个隔离的 `pip/setuptools/wheel` 环境，再用它去下载和安装依赖。
 - 这一步按 `--python` 选择兼容版本，不再要求你手工记“CentOS 7.5 + Python 3.6 该装哪个 pip”。
 - 对 `Python 3.6`，它会自动避开过新的 `pip/setuptools`，从而正确识别 wheel，避免 `cryptography` 走源码编译。
+- 目前只有 `Python 3.6` 做了显式兼容固定；其他 Python 版本默认安装该解释器还能用的最新 `pip/setuptools/wheel`。
 
 关于 `--build-constraint`：
 
@@ -81,6 +83,14 @@
 - 它约束的是主运行依赖，例如 `Jinja2`、`PyYAML`、`cryptography`、`packaging`。
 - 不加时：每次构建都会解析“当前仍兼容 `--python` 的最新版本”。
 - 加上时：会尽量固定成同一组版本，适合做可复现发布。
+
+关于“内置锁文件自动匹配”：
+
+- `build.sh` 现在会优先按 `包名 + 版本 + Python 主次版本` 去 `locks/` 目录里找内置锁文件。
+- 例如：`ansible-base==2.10.17` + `Python 3.6` 会自动匹配 `locks/ansible-base-2.10.17-py36.txt`。
+- 所以常见情况下，你不需要手工写 `--build-constraint`。
+- 只有你想覆盖默认锁文件，才显式传 `--build-constraint`。
+- 如果你想彻底禁用这层自动匹配，就传 `--no-auto-build-constraint`。
 
 ## `install-extras.sh`
 
@@ -137,14 +147,19 @@
 ```bash
 ./freeze-build-lock.sh \
   --python /usr/bin/python3.6 \
-  --source ansible-base==2.10.17 \
-  --output locks/ansible-base-2.10.17-py36.txt
+  --source ansible-base==2.10.17
+```
+
+默认输出到：
+
+```bash
+locks/ansible-base-2.10.17-py36.txt
 ```
 
 参数说明：
 
 - `--source`: 必填。官方包来源。
-- `--output`: 必填。输出锁文件路径。
+- `--output`: 可选。输出锁文件路径。不写时默认按 `./locks/<package>-<version>-pyXY.txt` 生成。
 - `--build-constraint`: 可选。允许在已有约束基础上继续解析。
 - `--python`: 指定控制机 Python。这个参数最关键。
 - `--wheelhouse`: 指定本地 wheel 目录。

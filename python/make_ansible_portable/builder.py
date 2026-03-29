@@ -296,6 +296,39 @@ def prepare_build_python(python_bin, wheelhouse, offline):
     return _prepare_build_python(python_bin, wheelhouse, offline)
 
 
+def _builtin_lock_filename(metadata, python_info):
+    version_info = python_info["version_info"]
+    return "{}-{}-py{}{}.txt".format(
+        _sanitize_name(metadata.package_name),
+        metadata.version,
+        int(version_info[0]),
+        int(version_info[1]),
+    )
+
+
+def _find_builtin_lock_file(metadata, python_info):
+    candidate = PROJECT_ROOT / "locks" / _builtin_lock_filename(metadata, python_info)
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def _resolve_main_build_constraint(explicit_constraint, auto_disabled, metadata, python_info):
+    if explicit_constraint:
+        return explicit_constraint.resolve(), "explicit"
+    if auto_disabled:
+        return None, "disabled"
+    builtin_lock = _find_builtin_lock_file(metadata, python_info)
+    if builtin_lock is not None:
+        print("Using built-in build constraint: {}".format(builtin_lock))
+        return builtin_lock, "builtin"
+    return None, "none"
+
+
+def _default_lock_output_path(metadata, python_info):
+    return (PROJECT_ROOT / "locks" / _builtin_lock_filename(metadata, python_info)).resolve()
+
+
 def _run(cmd, cwd=None):
     try:
         subprocess.run(
@@ -927,6 +960,12 @@ def build_portable_bundle(args):
             download_dir=temp_root / "downloads",
         )
         python_info = _validate_python_for_source(metadata, args.python)
+        main_build_constraint, main_build_constraint_mode = _resolve_main_build_constraint(
+            args.build_constraint,
+            getattr(args, "no_auto_build_constraint", False),
+            metadata,
+            python_info,
+        )
         bundle_name = args.bundle_name or f"portable-{_sanitize_name(metadata.package_name)}-{metadata.version}"
         output_dir = args.output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -968,7 +1007,7 @@ def build_portable_bundle(args):
             python_bin=prepared.tool_python,
             target=ansible_dir,
             packages=[str(metadata.artifact_path)],
-            constraint_file=args.build_constraint,
+            constraint_file=main_build_constraint,
             wheelhouse=args.wheelhouse,
             offline=args.offline,
         )
@@ -1002,7 +1041,8 @@ def build_portable_bundle(args):
                 "versions": prepared.tool_versions,
             },
             build_extras={
-                "build_constraint_file": str(args.build_constraint) if args.build_constraint else None,
+                "build_constraint_file": str(main_build_constraint) if main_build_constraint else None,
+                "build_constraint_mode": main_build_constraint_mode,
                 "packages": args.extra_package,
                 "requirement_files": [str(path) for path in args.extra_requirements],
                 "constraint_file": str(args.constraint) if args.constraint else None,
@@ -1048,7 +1088,7 @@ def freeze_build_lock(args):
         installed_distributions = _collect_installed_distributions(target)
         if not installed_distributions:
             raise BuildError(f"No installed distributions found while resolving lock for {args.source}")
-        lock_path = args.output.resolve()
+        lock_path = args.output.resolve() if args.output else _default_lock_output_path(metadata, python_info)
         _write_lock_file(lock_path, metadata, python_info, installed_distributions)
         return FreezeLockResult(
             lock_path=lock_path,
