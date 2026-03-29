@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.9"
+            source: "ansible-core==2.15.13"
+            bundle-name: "ci-ansible-core-2-15"
+          - python-version: "3.12"
+            source: "ansible-core==2.20.4"
+            bundle-name: "ci-ansible-core-2-20"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show Python version
+        run: python3 --version
+
+      - name: Compile project modules
+        run: python3 -m compileall templates python/make_ansible_portable
+
+      - name: Inspect upstream source metadata
+        run: ./inspect-source.sh --source "${{ matrix.source }}"
+
+      - name: Build portable bundle
+        run: >
+          ./build.sh
+          --python python3
+          --source "${{ matrix.source }}"
+          --bundle-name "${{ matrix.bundle-name }}"
+          --output-dir build/ci
+          --skip-archive
+          --clean-output
+
+      - name: Install example extras
+        run: >
+          ./install-extras.sh
+          --python python3
+          --bundle "build/ci/${{ matrix.bundle-name }}"
+          --extra-requirements examples/extras-mysql.txt
+          --self-test
+
+      - name: Upload bundle manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.bundle-name }}-manifest"
+          path: "build/ci/${{ matrix.bundle-name }}/portable-manifest.json"

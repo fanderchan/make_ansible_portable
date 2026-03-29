@@ -18,7 +18,7 @@
 - 本项目与 Ansible 项目、Red Hat、`ownport/portable-ansible` 没有关联，也不代表它们的官方立场。
 - 生成出的便携包会包含官方 Ansible 包和其依赖。你在分发这些产物时，还需要遵守它们各自的许可证。
 
-更多说明见 [LICENSE](LICENSE)、[NOTICE](NOTICE)、[ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) 和 [CONTRIBUTING.md](CONTRIBUTING.md)。
+更多说明见 [LICENSE](LICENSE)、[NOTICE](NOTICE)、[ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md)、[CONTRIBUTING.md](CONTRIBUTING.md)、[CHANGELOG.md](CHANGELOG.md) 和 [SECURITY.md](SECURITY.md)。
 
 ## 一键构建
 
@@ -194,6 +194,12 @@ python3 ./ansible-galaxy --version
 - 思路致谢：`ownport/portable-ansible`
 - 生成产物：遵循其中包含的官方 Ansible 和第三方依赖各自许可证
 - `--strip-metadata` 会删掉上游包的 `*.dist-info` / `*.egg-info`，可能同时删掉许可证元数据。这个选项只适合你明确评估过许可证影响的场景
+
+## 发布记录
+
+- 首个公开版本：`v0.1.0`
+- 变更记录见 [CHANGELOG.md](CHANGELOG.md)
+- 安全说明见 [SECURITY.md](SECURITY.md)
 
 ## 完整教程
 
