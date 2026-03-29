@@ -1,0 +1,16 @@
+dist/
+dist-tests/*
+!dist-tests/
+!dist-tests/tested-matrix.json
+build/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
