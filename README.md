@@ -95,6 +95,8 @@ python3 ./ansible-galaxy --version
 
 - `--build-constraint`：把依赖锁死，做成可复现构建
 
+`--build-constraint` 的作用不是“切换 Python”，而是锁住主运行依赖版本。比如 `ansible-base 2.10.17` 在 `Python 3.6` 下，实际会装进 bundle 的 `Jinja2`、`PyYAML`、`cryptography` 等版本，都可以通过这个文件固定下来。
+
 当前工具支持指定构建使用的 Python：
 
 ```bash
@@ -107,6 +109,18 @@ python3 ./ansible-galaxy --version
 如果 `--python` 低于该版本在官方文档里声明的控制机最低 Python 版本，构建会直接失败，而不是等 `pip` 打出一大串难读的版本过滤错误。
 
 这份人类可读的版本映射表维护在 [data/ansible_control_node_python.json](/usr/local/make_ansible_portable/data/ansible_control_node_python.json)，构建和 `inspect-source` 会优先读取它；包自身的 `Requires-Python` 只作为技术性兜底。
+
+从当前版本开始，工具还会自动为你准备一个“隔离的构建工具环境”：
+
+- 默认不再依赖系统里旧的 `pip/setuptools/wheel`
+- 会按你传入的 `--python` 自动准备兼容版本
+- 对 `Python 3.6`，会自动使用兼容组合，避免 `cryptography` 退回源码编译
+
+如果你想单独预热或排查这一层，可以执行：
+
+```bash
+./prepare-build-python.sh --python /usr/bin/python3
+```
 
 如果你想让结果可复现，而不是每次都装“当天最新但仍兼容”的依赖版本，就先生成锁文件，再按锁构建：
 

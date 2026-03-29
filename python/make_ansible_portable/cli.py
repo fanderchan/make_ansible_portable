@@ -10,6 +10,7 @@ from .builder import (
     freeze_build_lock,
     inspect_source,
     install_bundle_extras,
+    prepare_build_python,
 )
 
 
@@ -227,6 +228,12 @@ def build_parser():
     )
     _add_pip_options(freeze)
 
+    prepare = subparsers.add_parser(
+        "prepare-build-python",
+        help="Prepare an isolated pip/setuptools/wheel environment for the selected build Python.",
+    )
+    _add_pip_options(prepare)
+
     return parser
 
 
@@ -294,6 +301,14 @@ def main(argv=None):
             print(f"Lock file:         {result.lock_path}")
             print(f"Source package:    {result.source.package_name} {result.source.version}")
             print(f"Python:            {result.python['version'].splitlines()[0]}")
+            return 0
+
+        if args.command == "prepare-build-python":
+            result = prepare_build_python(args.python, args.wheelhouse, args.offline)
+            print("Target Python:     {}".format(args.python))
+            print("Tool Python:       {}".format(result.tool_python))
+            print("Cache directory:   {}".format(result.cache_dir))
+            print("Tool versions:     pip={pip} setuptools={setuptools} wheel={wheel}".format(**result.tool_versions))
             return 0
 
     except BuildError as exc:

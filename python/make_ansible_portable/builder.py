@@ -25,6 +25,7 @@ MANIFEST_FILE = "portable-manifest.json"
 PROJECT_LICENSE = PROJECT_ROOT / "LICENSE"
 PROJECT_NOTICE = PROJECT_ROOT / "NOTICE"
 PROJECT_ACKNOWLEDGEMENTS = PROJECT_ROOT / "ACKNOWLEDGEMENTS.md"
+DEFAULT_CACHE_ROOT = Path.home() / ".cache" / TOOL_NAME
 FALLBACK_COMMANDS = [
     "ansible",
     "ansible-config",
@@ -110,6 +111,15 @@ class FreezeLockResult(object):
         self.python = python
 
 
+class PreparedBuildPython(object):
+    def __init__(self, tool_python, target_python, target_python_info, tool_versions, cache_dir):
+        self.tool_python = tool_python
+        self.target_python = target_python
+        self.target_python_info = target_python_info
+        self.tool_versions = tool_versions
+        self.cache_dir = cache_dir
+
+
 def _python_info(python_bin):
     cmd = [
         python_bin,
@@ -133,6 +143,157 @@ def _python_info(python_bin):
     except subprocess.CalledProcessError as exc:
         raise BuildError(f"Failed to inspect Python interpreter: {python_bin}") from exc
     return json.loads(completed.stdout)
+
+
+def _cache_root():
+    raw_value = os.environ.get("MAKE_ANSIBLE_PORTABLE_CACHE_DIR")
+    if raw_value:
+        return Path(raw_value).expanduser()
+    return DEFAULT_CACHE_ROOT
+
+
+def _build_tool_requirements(version_info):
+    major = int(version_info[0])
+    minor = int(version_info[1])
+    if (major, minor) <= (3, 6):
+        return ["pip==21.3.1", "setuptools<60", "wheel==0.37.1"]
+    return ["pip", "setuptools", "wheel"]
+
+
+def _build_tool_cache_dir(python_bin, python_info):
+    version_info = python_info["version_info"]
+    version_text = "{}.{}".format(version_info[0], version_info[1])
+    sanitized = _sanitize_name(str(Path(python_bin).expanduser()))
+    return _cache_root() / "build-python" / version_text / sanitized
+
+
+def _venv_python_path(venv_dir):
+    return venv_dir / "bin" / "python"
+
+
+def _probe_packaging_tool_versions(python_bin):
+    cmd = [
+        python_bin,
+        "-c",
+        (
+            "import json; "
+            "import pip; "
+            "import setuptools; "
+            "import wheel; "
+            "print(json.dumps({"
+            "'pip': pip.__version__, "
+            "'setuptools': setuptools.__version__, "
+            "'wheel': wheel.__version__"
+            "}))"
+        ),
+    ]
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise BuildError("Failed to inspect build tool versions for {}".format(python_bin)) from exc
+    return json.loads(completed.stdout)
+
+
+def _build_tool_metadata_path(cache_dir):
+    return cache_dir / "toolchain.json"
+
+
+def _load_build_tool_metadata(cache_dir):
+    metadata_path = _build_tool_metadata_path(cache_dir)
+    if not metadata_path.exists():
+        return None
+    return json.loads(metadata_path.read_text(encoding="utf-8"))
+
+
+def _write_build_tool_metadata(cache_dir, metadata):
+    metadata_path = _build_tool_metadata_path(cache_dir)
+    metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def _ensure_venv_has_pip(tool_python):
+    try:
+        _run([tool_python, "-m", "pip", "--version"])
+        return
+    except BuildError:
+        pass
+    _run([tool_python, "-m", "ensurepip", "--upgrade"])
+
+
+def _prepare_build_python(python_bin, wheelhouse, offline):
+    target_python_info = _python_info(python_bin)
+    requirements = _build_tool_requirements(target_python_info["version_info"])
+    cache_dir = _build_tool_cache_dir(python_bin, target_python_info)
+    tool_python = _venv_python_path(cache_dir)
+    cached = _load_build_tool_metadata(cache_dir)
+    if cached and tool_python.exists():
+        if (
+            cached.get("target_python") == python_bin
+            and cached.get("requirements") == requirements
+            and cached.get("target_version_info") == target_python_info["version_info"]
+        ):
+            return PreparedBuildPython(
+                tool_python=str(tool_python),
+                target_python=python_bin,
+                target_python_info=target_python_info,
+                tool_versions=cached.get("tool_versions", {}),
+                cache_dir=cache_dir,
+            )
+
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+    cache_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    print("Preparing isolated build tools for Python {} using {}".format(
+        ".".join(str(item) for item in target_python_info["version_info"]),
+        python_bin,
+    ), flush=True)
+    _run([python_bin, "-m", "venv", str(cache_dir)])
+    _ensure_venv_has_pip(str(tool_python))
+
+    install_cmd = [str(tool_python), "-m", "pip", "install", "--upgrade"]
+    if wheelhouse:
+        install_cmd.extend(["--find-links", str(wheelhouse)])
+    if offline:
+        install_cmd.append("--no-index")
+    install_cmd.extend(requirements)
+
+    try:
+        _run(install_cmd)
+    except BuildError as exc:
+        if offline:
+            raise BuildError(
+                "Failed to prepare isolated build tools in offline mode. Provide --wheelhouse with pip/setuptools/wheel packages, "
+                "or prepare the cached tool environment first."
+            ) from exc
+        raise
+
+    tool_versions = _probe_packaging_tool_versions(str(tool_python))
+    _write_build_tool_metadata(
+        cache_dir,
+        {
+            "target_python": python_bin,
+            "target_version_info": target_python_info["version_info"],
+            "requirements": requirements,
+            "tool_versions": tool_versions,
+        },
+    )
+    return PreparedBuildPython(
+        tool_python=str(tool_python),
+        target_python=python_bin,
+        target_python_info=target_python_info,
+        tool_versions=tool_versions,
+        cache_dir=cache_dir,
+    )
+
+
+def prepare_build_python(python_bin, wheelhouse, offline):
+    return _prepare_build_python(python_bin, wheelhouse, offline)
 
 
 def _run(cmd, cwd=None):
@@ -422,9 +583,10 @@ def _apply_official_controller_support(metadata):
 
 
 def inspect_source(source, python_bin, wheelhouse, offline):
+    prepared = _prepare_build_python(python_bin, wheelhouse, offline)
     return _resolve_source_metadata(
         source=source,
-        python_bin=python_bin,
+        python_bin=prepared.tool_python,
         wheelhouse=wheelhouse,
         offline=offline,
         download_dir=None,
@@ -673,6 +835,7 @@ def _write_manifest(
     commands,
     python_bin,
     python_info,
+    build_python_tools,
     build_extras,
     installed_distributions,
 ):
@@ -689,6 +852,7 @@ def _write_manifest(
             "version": python_info["version"],
             "version_info": python_info["version_info"],
         },
+        "build_python_tools": build_python_tools,
         "bundle": {
             "name": bundle_dir.name,
             "commands": commands,
@@ -754,9 +918,10 @@ def _write_lock_file(lock_path, metadata, python_info, installed_distributions):
 def build_portable_bundle(args):
     with tempfile.TemporaryDirectory(prefix="portable-build-") as temp_dir:
         temp_root = Path(temp_dir)
+        prepared = _prepare_build_python(args.python, args.wheelhouse, args.offline)
         metadata = _resolve_source_metadata(
             source=args.source,
-            python_bin=args.python,
+            python_bin=prepared.tool_python,
             wheelhouse=args.wheelhouse,
             offline=args.offline,
             download_dir=temp_root / "downloads",
@@ -800,7 +965,7 @@ def build_portable_bundle(args):
         shutil.copy2(launcher_src, ansible_dir / "__main__.py")
 
         _install_with_pip(
-            python_bin=args.python,
+            python_bin=prepared.tool_python,
             target=ansible_dir,
             packages=[str(metadata.artifact_path)],
             constraint_file=args.build_constraint,
@@ -811,7 +976,7 @@ def build_portable_bundle(args):
 
         if args.extra_package or args.extra_requirements:
             _install_with_pip(
-                python_bin=args.python,
+                python_bin=prepared.tool_python,
                 target=extras_dir,
                 packages=args.extra_package,
                 requirement_files=args.extra_requirements,
@@ -831,6 +996,11 @@ def build_portable_bundle(args):
             commands=commands,
             python_bin=args.python,
             python_info=python_info,
+            build_python_tools={
+                "tool_python": prepared.tool_python,
+                "cache_dir": str(prepared.cache_dir),
+                "versions": prepared.tool_versions,
+            },
             build_extras={
                 "build_constraint_file": str(args.build_constraint) if args.build_constraint else None,
                 "packages": args.extra_package,
@@ -856,9 +1026,10 @@ def build_portable_bundle(args):
 def freeze_build_lock(args):
     with tempfile.TemporaryDirectory(prefix="portable-lock-") as temp_dir:
         temp_root = Path(temp_dir)
+        prepared = _prepare_build_python(args.python, args.wheelhouse, args.offline)
         metadata = _resolve_source_metadata(
             source=args.source,
-            python_bin=args.python,
+            python_bin=prepared.tool_python,
             wheelhouse=args.wheelhouse,
             offline=args.offline,
             download_dir=temp_root / "downloads",
@@ -867,7 +1038,7 @@ def freeze_build_lock(args):
         target = temp_root / "resolved"
         target.mkdir(parents=True)
         _install_with_pip(
-            python_bin=args.python,
+            python_bin=prepared.tool_python,
             target=target,
             packages=[str(metadata.artifact_path)],
             constraint_file=args.build_constraint,
@@ -900,12 +1071,13 @@ def _bundle_paths(bundle_dir):
 def install_bundle_extras(args):
     bundle_dir = args.bundle.resolve()
     _, extras_dir, manifest_path = _bundle_paths(bundle_dir)
+    prepared = _prepare_build_python(args.python, args.wheelhouse, args.offline)
 
     if not args.extra_package and not args.extra_requirements:
         raise BuildError("Nothing to install. Provide --extra-package and/or --extra-requirements.")
 
     _install_with_pip(
-        python_bin=args.python,
+        python_bin=prepared.tool_python,
         target=extras_dir,
         packages=args.extra_package,
         requirement_files=args.extra_requirements,

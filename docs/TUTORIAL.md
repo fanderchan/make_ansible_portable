@@ -60,6 +60,13 @@ python3 --version
 
 - `--build-constraint`：把当时解析出来的主运行依赖固定下来
 
+这里要特别分清：
+
+- `--python`：决定控制机 Python，也决定依赖解析的兼容范围
+- `--build-constraint`：决定是否把最终解析出来的依赖版本锁住
+
+例如 `ansible-base 2.10.17` 在 `Python 3.6` 下，真正会装进 bundle 的 `Jinja2`、`PyYAML`、`cryptography` 等版本，都属于 `--build-constraint` 管的范围。
+
 例子：
 
 ```bash
@@ -67,6 +74,18 @@ python3 --version
   --python /usr/bin/python3.6 \
   --source ansible-base==2.10.17 \
   --clean-output
+```
+
+从当前版本开始，`build.sh` 还会自动先准备一个隔离的构建工具环境：
+
+- 自动准备兼容的 `pip/setuptools/wheel`
+- 不再依赖系统自带的老 `pip`
+- 对 CentOS 7.5 这种 `Python 3.6 + pip 9` 的机器，能自动规避 `cryptography` 退回源码编译的问题
+
+如果你想先单独做这一层准备，可以执行：
+
+```bash
+./prepare-build-python.sh --python /usr/bin/python3.6
 ```
 
 如果你还想把依赖版本锁住，让以后重打时结果不漂移，建议改成两步：

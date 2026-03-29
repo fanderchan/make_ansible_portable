@@ -6,6 +6,7 @@
 - `./install-extras.sh`
 - `./inspect-source.sh`
 - `./freeze-build-lock.sh`
+- `./prepare-build-python.sh`
 - `./refresh-tested-matrix.sh`
 
 你也可以直接执行 `--help` 查看当前版本的参数：
@@ -15,6 +16,7 @@
 ./install-extras.sh --help
 ./inspect-source.sh --help
 ./freeze-build-lock.sh --help
+./prepare-build-python.sh --help
 ./refresh-tested-matrix.sh --help
 ```
 
@@ -66,6 +68,19 @@
 - `2.10` 这一代在 PyPI 上的官方包名是 `ansible-base`。
 - 从 `2.11` 开始，官方包名才是 `ansible-core`。
 - 也就是说，`2.10.17` 要写成 `ansible-base==2.10.17`。
+
+关于“自动准备构建工具”：
+
+- `build.sh` 现在会先自动准备一个隔离的 `pip/setuptools/wheel` 环境，再用它去下载和安装依赖。
+- 这一步按 `--python` 选择兼容版本，不再要求你手工记“CentOS 7.5 + Python 3.6 该装哪个 pip”。
+- 对 `Python 3.6`，它会自动避开过新的 `pip/setuptools`，从而正确识别 wheel，避免 `cryptography` 走源码编译。
+
+关于 `--build-constraint`：
+
+- 这个参数是“锁版本”，不是“选 Python”。
+- 它约束的是主运行依赖，例如 `Jinja2`、`PyYAML`、`cryptography`、`packaging`。
+- 不加时：每次构建都会解析“当前仍兼容 `--python` 的最新版本”。
+- 加上时：会尽量固定成同一组版本，适合做可复现发布。
 
 ## `install-extras.sh`
 
@@ -134,6 +149,22 @@
 - `--python`: 指定控制机 Python。这个参数最关键。
 - `--wheelhouse`: 指定本地 wheel 目录。
 - `--offline`: 不访问 PyPI。通常要配合 `--wheelhouse` 或本地包文件使用。
+
+## `prepare-build-python.sh`
+
+用途：提前准备构建过程中使用的隔离 `pip/setuptools/wheel` 环境。
+
+常见用法：
+
+```bash
+./prepare-build-python.sh --python /usr/bin/python3
+```
+
+参数说明：
+
+- `--python`: 必填语义上最重要。指定要为哪个控制机 Python 准备构建工具。
+- `--wheelhouse`: 可选。离线或半离线准备时使用本地 wheel 仓库。
+- `--offline`: 不访问 PyPI。通常要配合 `--wheelhouse`。
 
 ## `refresh-tested-matrix.sh`
 
