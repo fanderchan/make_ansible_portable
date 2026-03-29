@@ -30,6 +30,73 @@
 python3 --version
 ```
 
+## 2.1 先分清两个 Python
+
+这里一定要分清：
+
+- 控制机 Python：运行便携版 Ansible 的 Python
+- 目标机 Python：远程主机执行 Ansible 模块时使用的 Python
+
+对 `ansible-base 2.10`，官方 `2.10` 安装文档写的是：
+
+- 控制机：`Python 2.7` 或 `Python 3.5+`
+- 目标机：`Python 2.6+` 或 `Python 3.5+`
+
+所以如果你的目标是：
+
+- 便携包要运行在 CentOS 7.5 控制机上
+- 而那台控制机只有 `Python 3.6`
+
+那你就应该用 `Python 3.6` 来构建。原因很简单：当前工具会用你指定的 Python 去做 `pip install` 和自测，依赖版本会跟着那个 Python 的兼容范围来选。
+
+构建前用于判断“这个版本最低该用什么控制机 Python”的映射表，维护在 [data/ansible_control_node_python.json](/usr/local/make_ansible_portable/data/ansible_control_node_python.json)。这份表是按 Ansible 官方文档整理出来的，用户输出优先读它，不再直接展示难看的 `Requires-Python` 原始字符串。
+
+对 `build.sh` 来说，最关键的两个参数就是：
+
+- `--source`：你要打包的官方包版本
+- `--python`：这个便携包实际要跑在哪个控制机 Python 上
+
+如果你还要求可复现，就再加第三个参数：
+
+- `--build-constraint`：把当时解析出来的主运行依赖固定下来
+
+例子：
+
+```bash
+./build.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --clean-output
+```
+
+如果你还想把依赖版本锁住，让以后重打时结果不漂移，建议改成两步：
+
+```bash
+./freeze-build-lock.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --output locks/ansible-base-2.10.17-py36.txt
+
+./build.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --build-constraint locks/ansible-base-2.10.17-py36.txt \
+  --clean-output
+```
+
+构建完成后，可以查看：
+
+```bash
+jq '.python,.installed_distributions' dist/portable-ansible-base-2.10.17/portable-manifest.json
+```
+
+这样你就能确认：
+
+- 构建到底用了哪个 Python
+- 最终装进去了哪些依赖和版本
+
+如果你希望下一次构建还是完全同一组版本，就不要只看 manifest，要把 `freeze-build-lock.sh` 生成的锁文件一起保存下来。
+
 ## 3. 最简单的一键构建
 
 完整参数表见 [docs/COMMANDS.md](COMMANDS.md)。
@@ -39,6 +106,12 @@ python3 --version
 ```bash
 cd make_ansible_portable
 ./build.sh --source ansible-core==2.15.13 --clean-output
+```
+
+如果你要打的是 `2.10.x`，要注意官方包名是 `ansible-base`，例如：
+
+```bash
+./build.sh --source ansible-base==2.10.17 --clean-output
 ```
 
 这会做几件事：

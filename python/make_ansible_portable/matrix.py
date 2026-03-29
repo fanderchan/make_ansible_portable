@@ -342,6 +342,7 @@ def _build_release(
         clean_output=True,
         skip_archive=True,
         skip_self_test=False,
+        build_constraint=None,
         strip_metadata=False,
         python=python_candidate.executable,
         wheelhouse=wheelhouse,

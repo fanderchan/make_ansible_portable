@@ -33,6 +33,8 @@ cd make_ansible_portable
 
 `--clean-output` 的意思是：如果 `dist/` 里已经有同名的旧目录或旧压缩包，就先删掉再重建；不加这个参数时，遇到同名旧产物会直接报错，避免误覆盖。
 
+注意：`2.10` 这一代官方 PyPI 包名是 `ansible-base`，不是 `ansible-core`。例如要打 `2.10.17`，应使用 `ansible-base==2.10.17`。
+
 从你已经下载好的官方 wheel 构建：
 
 ```bash
@@ -68,6 +70,68 @@ cd dist/portable-ansible-core-2.15.13
 python3 ./ansible localhost -m ping
 python3 ./ansible-playbook playbook.yml
 python3 ./ansible-galaxy --version
+```
+
+## 控制机 Python 和目标机 Python
+
+这两个概念不要混在一起：
+
+- 控制机 Python：运行这个便携包的 Python。也就是你执行 `python3 ./ansible` 时用的那个 Python。
+- 目标机 Python：Ansible 连接远程主机后，远程模块实际使用的 Python。
+
+对 `ansible-base 2.10`，官方 `2.10` 文档说明：
+
+- 控制机支持 `Python 2.7` 或 `Python 3.5+`
+- 目标机支持 `Python 2.6+` 或 `Python 3.5+`
+
+如果你的便携包要跑在 CentOS 7.5 控制机上，并且那台控制机只有 `Python 3.6`，那你就应该用 `Python 3.6` 来构建和自测，这样 `pip` 才会解析出与 `Python 3.6` 兼容的依赖版本。
+
+对 `build.sh` 来说，最重要的两个参数就是：
+
+- `--source`：你要打包的官方包版本
+- `--python`：这个便携包实际要跑在哪个控制机 Python 上
+
+如果你还要求“下一次重打仍然是同一组依赖版本”，就再加第三个参数：
+
+- `--build-constraint`：把依赖锁死，做成可复现构建
+
+当前工具支持指定构建使用的 Python：
+
+```bash
+./build.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --clean-output
+```
+
+如果 `--python` 低于该版本在官方文档里声明的控制机最低 Python 版本，构建会直接失败，而不是等 `pip` 打出一大串难读的版本过滤错误。
+
+这份人类可读的版本映射表维护在 [data/ansible_control_node_python.json](/usr/local/make_ansible_portable/data/ansible_control_node_python.json)，构建和 `inspect-source` 会优先读取它；包自身的 `Requires-Python` 只作为技术性兜底。
+
+如果你想让结果可复现，而不是每次都装“当天最新但仍兼容”的依赖版本，就先生成锁文件，再按锁构建：
+
+```bash
+./freeze-build-lock.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --output locks/ansible-base-2.10.17-py36.txt
+
+./build.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --build-constraint locks/ansible-base-2.10.17-py36.txt \
+  --clean-output
+```
+
+构建完成后，便携包根目录的 `portable-manifest.json` 会记录：
+
+- 构建时使用的 Python 路径和版本
+- 最终装进 bundle 的分发包列表和版本
+
+例如：
+
+```bash
+jq '.python,.installed_distributions' dist/portable-ansible-base-2.10.17/portable-manifest.json
 ```
 
 ## 第三方 Python 包注入
@@ -186,10 +250,12 @@ python3 ./ansible-galaxy --version
 - `build.sh`: 主构建入口
 - `install-extras.sh`: 给已构建便携包追加第三方 Python 包
 - `inspect-source.sh`: 读取官方包元数据和运行时依赖
+- `freeze-build-lock.sh`: 解析并生成主依赖锁文件
 - `refresh-tested-matrix.sh`: 批量测试每个 minor 的末版并刷新 README 矩阵
 - `python/make_ansible_portable/`: Python 实现
 - `templates/__main__.py`: 便携入口模板
 - `examples/`: 常见 extras 示例
+- `locks/`: 可复现构建用的约束文件示例
 - `docs/COMMANDS.md`: 命令行参数参考
 - `docs/TUTORIAL.md`: 完整教程
 

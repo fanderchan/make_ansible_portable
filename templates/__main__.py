@@ -3,8 +3,6 @@
 # Copyright 2026 Fander Chan
 # SPDX-License-Identifier: Apache-2.0
 
-from __future__ import annotations
-
 import importlib
 import os
 import shutil
@@ -67,10 +65,10 @@ def _normalized_command_name(raw_name: str) -> str:
     return raw_name
 
 
-def _filtered_sys_path(bundle_root: Path) -> list[str]:
+def _filtered_sys_path(bundle_root):
     bundle_text = os.path.normpath(str(bundle_root))
     extras_text = os.path.normpath(str(bundle_root / "extras"))
-    filtered: list[str] = []
+    filtered = []
 
     for raw_path in sys.path:
         if not raw_path:
@@ -97,7 +95,7 @@ def _load_attribute(module_name: str, attribute_name: str):
     return getattr(module, attribute_name)
 
 
-def _coerce_argv() -> list[str]:
+def _coerce_argv():
     try:
         from ansible.module_utils._text import to_text
 

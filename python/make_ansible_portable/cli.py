@@ -8,6 +8,7 @@ from pathlib import Path
 from .builder import (
     BuildError,
     build_portable_bundle,
+    freeze_build_lock,
     inspect_source,
     install_bundle_extras,
 )
@@ -99,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-self-test",
         action="store_true",
         help="Skip 'python <bundle>/ansible localhost -m ping' validation.",
+    )
+    build.add_argument(
+        "--build-constraint",
+        type=Path,
+        help="Optional pip constraints file applied when installing the main Ansible/runtime dependencies.",
     )
     build.add_argument(
         "--strip-metadata",
@@ -200,6 +206,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build the tested bundles without PyPI package downloads. PyPI JSON is still queried for release metadata.",
     )
 
+    freeze = subparsers.add_parser(
+        "freeze-build-lock",
+        help="Resolve and write a reproducible constraints file for the main Ansible/runtime dependencies.",
+    )
+    freeze.add_argument(
+        "--source",
+        required=True,
+        help="Official package source. Examples: ansible-base==2.10.17 or ansible-core==2.15.13",
+    )
+    freeze.add_argument(
+        "--output",
+        required=True,
+        type=Path,
+        help="Output constraints file path.",
+    )
+    freeze.add_argument(
+        "--build-constraint",
+        type=Path,
+        help="Optional existing constraints file applied during resolution.",
+    )
+    _add_pip_options(freeze)
+
     return parser
 
 
@@ -236,6 +264,16 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"Package: {metadata.package_name}")
                 print(f"Version: {metadata.version}")
+                if metadata.official_controller_min_python:
+                    print(f"Control-node minimum Python 3: {metadata.official_controller_min_python}")
+                    if metadata.official_controller_support:
+                        print(f"Official control-node support: {metadata.official_controller_support}")
+                    if metadata.official_controller_support_note:
+                        print(f"Official note: {metadata.official_controller_support_note}")
+                    if metadata.official_controller_support_url:
+                        print(f"Official docs: {metadata.official_controller_support_url}")
+                elif metadata.requires_python:
+                    print(f"Package metadata Requires-Python: {metadata.requires_python}")
                 print(f"Artifact: {metadata.artifact_path}")
                 print("Runtime requirements:")
                 for requirement in metadata.runtime_requirements:
@@ -249,6 +287,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Results JSON:      {result.results_json_path}")
             print(f"Passed minors:     {passed}/{len(result.entries)}")
             return 0 if result.all_passed else 1
+
+        if args.command == "freeze-build-lock":
+            result = freeze_build_lock(args)
+            print(f"Lock file:         {result.lock_path}")
+            print(f"Source package:    {result.source.package_name} {result.source.version}")
+            print(f"Python:            {result.python['version'].splitlines()[0]}")
+            return 0
 
     except BuildError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

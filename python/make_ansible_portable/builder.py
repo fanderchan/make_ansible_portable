@@ -5,17 +5,21 @@ import email
 import json
 import os
 import py_compile
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import TOOL_NAME, TOOL_VERSION
+from .controller_support import lookup_controller_support
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
@@ -47,7 +51,13 @@ class SourceMetadata:
     artifact_path: Path
     package_name: str
     version: str
+    requires_python: str
     runtime_requirements: list[str]
+    official_controller_min_python: str = ""
+    official_controller_support: str = ""
+    official_controller_support_url: str = ""
+    official_controller_support_note: str = ""
+    official_controller_support_note_url: str = ""
 
     def to_dict(self) -> dict[str, object]:
         source_path = Path(self.input_source).expanduser()
@@ -57,7 +67,15 @@ class SourceMetadata:
             "artifact_path": str(source_path.resolve()) if source_path.exists() else None,
             "package_name": self.package_name,
             "version": self.version,
+            "requires_python": self.requires_python,
             "runtime_requirements": self.runtime_requirements,
+            "official_controller_python": {
+                "minimum_python3": self.official_controller_min_python or None,
+                "display": self.official_controller_support or None,
+                "source_url": self.official_controller_support_url or None,
+                "note": self.official_controller_support_note or None,
+                "note_source_url": self.official_controller_support_note_url or None,
+            },
         }
 
 
@@ -72,6 +90,32 @@ class BuildResult:
 class ExtrasInstallResult:
     extras_dir: Path
     manifest_path: Path
+
+
+@dataclass
+class FreezeLockResult:
+    lock_path: Path
+    source: SourceMetadata
+    python: dict[str, object]
+
+
+def _python_info(python_bin: str) -> dict[str, object]:
+    cmd = [
+        python_bin,
+        "-c",
+        (
+            "import json, sys; "
+            "print(json.dumps({"
+            "'version': sys.version, "
+            "'version_info': list(sys.version_info[:3])"
+            "}))"
+        ),
+    ]
+    try:
+        completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        raise BuildError(f"Failed to inspect Python interpreter: {python_bin}") from exc
+    return json.loads(completed.stdout)
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> None:
@@ -97,6 +141,121 @@ def _sanitize_name(value: str) -> str:
     while "--" in result:
         result = result.replace("--", "-")
     return result.strip("-")
+
+
+SPECIFIER_RE = re.compile(r"^(<=|>=|==|!=|<|>|~=)\s*([0-9]+(?:\.[0-9]+){0,2})(\.\*)?$")
+EXACT_PYPI_SPEC_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*==\s*([0-9]+(?:\.[0-9]+){1,2})\s*$")
+PYPI_RELEASE_JSON = "https://pypi.org/pypi/{package}/{version}/json"
+
+
+def _normalize_version(value: str) -> tuple[int, int, int]:
+    parts = [int(part) for part in value.split(".") if part]
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def _compare_tuple_prefix(left: tuple[int, int, int], right_text: str) -> bool:
+    raw_parts = [int(part) for part in right_text.split(".") if part]
+    return tuple(left[: len(raw_parts)]) == tuple(raw_parts)
+
+
+def _version_matches_spec(version: tuple[int, int, int], requires_python: str) -> bool:
+    spec_text = requires_python.strip()
+    if not spec_text:
+        return True
+
+    for raw_part in spec_text.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        match = SPECIFIER_RE.match(part)
+        if not match:
+            raise BuildError(f"Unsupported Requires-Python specifier: {requires_python}")
+        operator, version_text, wildcard = match.groups()
+        target = _normalize_version(version_text)
+
+        if wildcard:
+            if operator == "==":
+                if not _compare_tuple_prefix(version, version_text):
+                    return False
+                continue
+            if operator == "!=":
+                if _compare_tuple_prefix(version, version_text):
+                    return False
+                continue
+            raise BuildError(f"Unsupported wildcard specifier: {part}")
+
+        if operator == ">=" and version < target:
+            return False
+        elif operator == "<=" and version > target:
+            return False
+        elif operator == ">" and version <= target:
+            return False
+        elif operator == "<" and version >= target:
+            return False
+        elif operator == "==" and version != target:
+            return False
+        elif operator == "!=" and version == target:
+            return False
+        elif operator == "~=":
+            if version < target:
+                return False
+            segments = [int(part) for part in version_text.split(".") if part]
+            if len(segments) <= 2:
+                upper = (segments[0] + 1, 0, 0)
+            else:
+                upper = (segments[0], segments[1] + 1, 0)
+            if version >= upper:
+                return False
+
+    return True
+
+
+def _fetch_json(url: str) -> dict[str, object]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": f"{TOOL_NAME}/{TOOL_VERSION}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise BuildError(f"Failed to fetch {url}: {exc}") from exc
+
+
+def _exact_pypi_release_requires_python(source: str) -> tuple[str, str, str] | None:
+    match = EXACT_PYPI_SPEC_RE.match(source)
+    if not match:
+        return None
+    package = match.group(1)
+    version = match.group(2)
+    payload = _fetch_json(PYPI_RELEASE_JSON.format(package=package, version=version))
+    info = payload.get("info", {})
+    if not isinstance(info, dict):
+        raise BuildError(f"Unexpected release metadata for {package} {version}")
+    requires_python = str(info.get("requires_python") or "")
+    return package, version, requires_python
+
+
+def _normalize_source_alias(source: str) -> str:
+    stripped = source.strip()
+
+    exact_210 = re.fullmatch(r"(?i)(ansible[-_]core)\s*==\s*(2\.10(?:\.\d+)?)", stripped)
+    if exact_210:
+        return f"ansible-base=={exact_210.group(2)}"
+
+    mentions_core_210 = re.search(r"(?i)\bansible[-_]core\b", stripped) and re.search(r"\b2\.10(\b|[^\d])", stripped)
+    if mentions_core_210:
+        raise BuildError(
+            "Ansible 2.10 is published on PyPI as 'ansible-base', not 'ansible-core'. "
+            f"Use 'ansible-base==2.10.x' instead of '{source}'."
+        )
+
+    return source
 
 
 def _download_artifact(
@@ -157,6 +316,36 @@ def _parse_requirements_text(raw_text: str) -> list[str]:
     return requirements
 
 
+def _read_metadata_version(metadata_path: Path) -> tuple[str | None, str | None]:
+    if metadata_path.suffix == ".dist-info":
+        raw_text = (metadata_path / "METADATA").read_text(encoding="utf-8", errors="replace")
+    else:
+        raw_text = (metadata_path / "PKG-INFO").read_text(encoding="utf-8", errors="replace")
+    message = _parse_email_metadata(raw_text)
+    return message.get("Name"), message.get("Version")
+
+
+def _collect_installed_distributions(ansible_dir: Path) -> list[dict[str, str]]:
+    distributions: list[dict[str, str]] = []
+    for metadata_path in sorted(ansible_dir.glob("*.dist-info")) + sorted(ansible_dir.glob("*.egg-info")):
+        if metadata_path.suffix == ".dist-info" and not (metadata_path / "METADATA").exists():
+            continue
+        if metadata_path.suffix == ".egg-info" and not (metadata_path / "PKG-INFO").exists():
+            continue
+        name, version = _read_metadata_version(metadata_path)
+        if not name or not version:
+            continue
+        distributions.append(
+            {
+                "name": name,
+                "version": version,
+                "metadata_dir": metadata_path.name,
+            }
+        )
+    distributions.sort(key=lambda item: item["name"].lower())
+    return distributions
+
+
 def _inspect_wheel(artifact: Path, input_source: str) -> SourceMetadata:
     with zipfile.ZipFile(artifact) as archive:
         metadata_name = next(
@@ -171,6 +360,7 @@ def _inspect_wheel(artifact: Path, input_source: str) -> SourceMetadata:
         artifact_path=artifact,
         package_name=message["Name"],
         version=message["Version"],
+        requires_python=str(message.get("Requires-Python") or ""),
         runtime_requirements=message.get_all("Requires-Dist", []),
     )
 
@@ -196,6 +386,7 @@ def _inspect_sdist(artifact: Path, input_source: str) -> SourceMetadata:
         artifact_path=artifact,
         package_name=message["Name"],
         version=message["Version"],
+        requires_python=str(message.get("Requires-Python") or ""),
         runtime_requirements=runtime_requirements,
     )
 
@@ -206,6 +397,18 @@ def _inspect_artifact(artifact: Path, input_source: str) -> SourceMetadata:
     if artifact.suffix in {".zip", ".gz", ".bz2", ".xz"} or artifact.name.endswith(".tar.gz") or artifact.name.endswith(".tar.bz2") or artifact.name.endswith(".tar.xz"):
         return _inspect_sdist(artifact, input_source)
     raise BuildError(f"Unsupported artifact type: {artifact}")
+
+
+def _apply_official_controller_support(metadata: SourceMetadata) -> SourceMetadata:
+    support = lookup_controller_support(metadata.package_name, metadata.version)
+    if support is None:
+        return metadata
+    metadata.official_controller_min_python = support.minimum_python3
+    metadata.official_controller_support = support.official_text
+    metadata.official_controller_support_url = support.source_url
+    metadata.official_controller_support_note = support.note
+    metadata.official_controller_support_note_url = support.note_source_url
+    return metadata
 
 
 def inspect_source(
@@ -236,25 +439,97 @@ def _resolve_source_metadata(
     if source_path.exists():
         artifact = source_path.resolve()
     else:
+        resolved_source = _normalize_source_alias(source)
+        exact_release = _exact_pypi_release_requires_python(resolved_source)
+        if exact_release is not None:
+            package, version, requires_python = exact_release
+            python_info = _python_info(python_bin)
+            version_info = python_info["version_info"]
+            version_tuple = (int(version_info[0]), int(version_info[1]), int(version_info[2]))
+            support = lookup_controller_support(package, version)
+            if support is not None:
+                official_min_tuple = _normalize_version(support.minimum_python3)
+                if version_tuple < official_min_tuple:
+                    message = (
+                        f"Python {version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]} is lower than the documented "
+                        f"control-node minimum for {package} {version}: {support.minimum_python3}+"
+                    )
+                    if support.official_text:
+                        message += f" (official support text: {support.official_text})"
+                    if support.source_url:
+                        message += f". Source: {support.source_url}"
+                    raise BuildError(message)
+            if requires_python and not _version_matches_spec(version_tuple, requires_python):
+                if support is not None:
+                    message = (
+                        f"Python {version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]} meets the documented "
+                        f"control-node minimum for {package} {version} ({support.minimum_python3}+), but the "
+                        f"downloadable package artifact declares a stricter Requires-Python: {requires_python}. "
+                        "This affects direct pip download/install for that artifact."
+                    )
+                    if support.source_url:
+                        message += f" Official docs: {support.source_url}"
+                    raise BuildError(message)
+                raise BuildError(
+                    f"Python {version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]} does not satisfy "
+                    f"{package} {version} package metadata Requires-Python: {requires_python}"
+                )
         if download_dir is None:
             with tempfile.TemporaryDirectory(prefix="portable-source-") as temp_dir:
                 artifact = _download_artifact(
-                    source,
+                    resolved_source,
                     python_bin=python_bin,
                     download_dir=Path(temp_dir),
                     wheelhouse=wheelhouse,
                     offline=offline,
                 )
-                return _inspect_artifact(artifact, source)
+                return _apply_official_controller_support(_inspect_artifact(artifact, source))
         artifact = _download_artifact(
-            source,
+            resolved_source,
             python_bin=python_bin,
             download_dir=download_dir,
             wheelhouse=wheelhouse,
             offline=offline,
         )
 
-    return _inspect_artifact(artifact, source)
+    return _apply_official_controller_support(_inspect_artifact(artifact, source))
+
+
+def _validate_python_for_source(metadata: SourceMetadata, python_bin: str) -> dict[str, object]:
+    python_info = _python_info(python_bin)
+    version_info = python_info["version_info"]
+    version_tuple = (int(version_info[0]), int(version_info[1]), int(version_info[2]))
+    official_min = metadata.official_controller_min_python.strip()
+    if official_min:
+        official_min_tuple = _normalize_version(official_min)
+        if version_tuple < official_min_tuple:
+            message = (
+                f"Python {version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]} is lower than the documented "
+                f"control-node minimum for {metadata.package_name} {metadata.version}: "
+                f"{metadata.official_controller_min_python}+"
+            )
+            if metadata.official_controller_support:
+                message += f" (official support text: {metadata.official_controller_support})"
+            if metadata.official_controller_support_url:
+                message += f". Source: {metadata.official_controller_support_url}"
+            raise BuildError(message)
+    requires_python = metadata.requires_python.strip()
+    if requires_python and not _version_matches_spec(version_tuple, requires_python):
+        if official_min:
+            message = (
+                f"Python {version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]} meets the documented control-node "
+                f"minimum for {metadata.package_name} {metadata.version} ({metadata.official_controller_min_python}+), "
+                f"but the downloadable package artifact declares a stricter Requires-Python: {requires_python}. "
+                "This affects direct pip download/install for that artifact."
+            )
+            if metadata.official_controller_support_url:
+                message += f" Official docs: {metadata.official_controller_support_url}"
+            raise BuildError(message)
+        raise BuildError(
+            f"Python {version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]} does not satisfy "
+            f"{metadata.package_name} {metadata.version} package metadata Requires-Python: {requires_python}"
+        )
+    return python_info
 
 
 def _install_with_pip(
@@ -402,7 +677,9 @@ def _write_manifest(
     metadata: SourceMetadata,
     commands: list[str],
     python_bin: str,
+    python_info: dict[str, object],
     build_extras: dict[str, object],
+    installed_distributions: list[dict[str, str]],
 ) -> Path:
     manifest_path = bundle_dir / MANIFEST_FILE
     manifest = {
@@ -414,7 +691,8 @@ def _write_manifest(
         "source": metadata.to_dict(),
         "python": {
             "executable": python_bin,
-            "version": sys.version,
+            "version": python_info["version"],
+            "version_info": python_info["version_info"],
         },
         "bundle": {
             "name": bundle_dir.name,
@@ -423,6 +701,7 @@ def _write_manifest(
             "extras_dir": "ansible/extras",
         },
         "build_extras": build_extras,
+        "installed_distributions": installed_distributions,
         "extra_installs": [],
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -464,6 +743,19 @@ def _create_archive(bundle_dir: Path, compression: str) -> Path:
     return archive_path
 
 
+def _write_lock_file(lock_path: Path, metadata: SourceMetadata, python_info: dict[str, object], installed_distributions: list[dict[str, str]]) -> None:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# Lock file for {metadata.package_name} {metadata.version}",
+        f"# Generated by {TOOL_NAME} {TOOL_VERSION}",
+        f"# Source: {metadata.input_source}",
+        f"# Python: {python_info['version'].splitlines()[0]}",
+        "",
+    ]
+    lines.extend(f"{item['name']}=={item['version']}" for item in installed_distributions)
+    lock_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def build_portable_bundle(args) -> BuildResult:
     with tempfile.TemporaryDirectory(prefix="portable-build-") as temp_dir:
         temp_root = Path(temp_dir)
@@ -474,6 +766,7 @@ def build_portable_bundle(args) -> BuildResult:
             offline=args.offline,
             download_dir=temp_root / "downloads",
         )
+        python_info = _validate_python_for_source(metadata, args.python)
         bundle_name = args.bundle_name or f"portable-{_sanitize_name(metadata.package_name)}-{metadata.version}"
         output_dir = args.output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -515,6 +808,7 @@ def build_portable_bundle(args) -> BuildResult:
             python_bin=args.python,
             target=ansible_dir,
             packages=[str(metadata.artifact_path)],
+            constraint_file=args.build_constraint,
             wheelhouse=args.wheelhouse,
             offline=args.offline,
         )
@@ -532,6 +826,7 @@ def build_portable_bundle(args) -> BuildResult:
             )
 
         commands = _discover_ansible_commands(ansible_dir)
+        installed_distributions = _collect_installed_distributions(ansible_dir)
         _create_command_symlinks(stage_root, commands)
         _write_quickstart(stage_root, commands, metadata)
         _write_bundle_notices(stage_root, metadata)
@@ -540,11 +835,14 @@ def build_portable_bundle(args) -> BuildResult:
             metadata=metadata,
             commands=commands,
             python_bin=args.python,
+            python_info=python_info,
             build_extras={
+                "build_constraint_file": str(args.build_constraint) if args.build_constraint else None,
                 "packages": args.extra_package,
                 "requirement_files": [str(path) for path in args.extra_requirements],
                 "constraint_file": str(args.constraint) if args.constraint else None,
             },
+            installed_distributions=installed_distributions,
         )
         _prune_bundle(ansible_dir, strip_metadata=args.strip_metadata)
         shutil.move(str(stage_root), str(bundle_dir))
@@ -558,6 +856,39 @@ def build_portable_bundle(args) -> BuildResult:
         archive_path=created_archive,
         manifest_path=bundle_dir / MANIFEST_FILE,
     )
+
+
+def freeze_build_lock(args) -> FreezeLockResult:
+    with tempfile.TemporaryDirectory(prefix="portable-lock-") as temp_dir:
+        temp_root = Path(temp_dir)
+        metadata = _resolve_source_metadata(
+            source=args.source,
+            python_bin=args.python,
+            wheelhouse=args.wheelhouse,
+            offline=args.offline,
+            download_dir=temp_root / "downloads",
+        )
+        python_info = _validate_python_for_source(metadata, args.python)
+        target = temp_root / "resolved"
+        target.mkdir(parents=True)
+        _install_with_pip(
+            python_bin=args.python,
+            target=target,
+            packages=[str(metadata.artifact_path)],
+            constraint_file=args.build_constraint,
+            wheelhouse=args.wheelhouse,
+            offline=args.offline,
+        )
+        installed_distributions = _collect_installed_distributions(target)
+        if not installed_distributions:
+            raise BuildError(f"No installed distributions found while resolving lock for {args.source}")
+        lock_path = args.output.resolve()
+        _write_lock_file(lock_path, metadata, python_info, installed_distributions)
+        return FreezeLockResult(
+            lock_path=lock_path,
+            source=metadata,
+            python=python_info,
+        )
 
 
 def _bundle_paths(bundle_dir: Path) -> tuple[Path, Path, Path]:

@@ -5,6 +5,7 @@
 - `./build.sh`
 - `./install-extras.sh`
 - `./inspect-source.sh`
+- `./freeze-build-lock.sh`
 - `./refresh-tested-matrix.sh`
 
 你也可以直接执行 `--help` 查看当前版本的参数：
@@ -13,12 +14,22 @@
 ./build.sh --help
 ./install-extras.sh --help
 ./inspect-source.sh --help
+./freeze-build-lock.sh --help
 ./refresh-tested-matrix.sh --help
 ```
 
 ## `build.sh`
 
 用途：把官方 `ansible-base` / `ansible-core` 包打成便携目录和压缩包。
+
+先记最重要的两个参数：
+
+- `--source`: 你要打包的官方包版本
+- `--python`: 这个便携包实际要跑在哪个控制机 Python 上
+
+如果你还要求可复现，再加：
+
+- `--build-constraint`: 把主运行依赖锁死
 
 常见用法：
 
@@ -33,10 +44,11 @@
 - `--output-dir`: 输出目录。默认是 `dist/`。
 - `--compression`: 压缩格式，可选 `gz`、`bz2`、`xz`。默认是 `gz`。
 - `--clean-output`: 如果输出目录里已经存在同名 bundle 目录，或者存在同名的旧压缩包，就先删除再重建。
+- `--build-constraint`: 主 Ansible/runtime 依赖安装时使用的 pip constraints 文件，用来实现可复现构建。
 - `--skip-archive`: 只生成目录，不生成 tar 包。
 - `--skip-self-test`: 跳过 `localhost -m ping` 自测。
 - `--strip-metadata`: 删除 `*.dist-info` 和 `*.egg-info`，减小体积，但也可能删掉上游许可证元数据。
-- `--python`: 指定构建和自测时使用的 Python 解释器。默认是当前 Python。
+- `--python`: 指定构建和自测时使用的 Python 解释器。默认是当前 Python。如果它低于该 Ansible 版本在官方文档里声明的控制机最低 Python 版本，构建会直接失败。
 - `--wheelhouse`: 指定本地 wheel 目录，构建时通过 `pip --find-links` 使用。
 - `--offline`: 不访问 PyPI。通常要配合 `--wheelhouse` 或本地包文件使用。
 - `--extra-package`: 在构建时顺便安装额外的 Python 包到 `ansible/extras`。可重复。
@@ -48,6 +60,12 @@
 - 它不是“随便清理临时目录”，而是专门清理当前这次构建对应的旧产物。
 - 当前行为是：删除同名 bundle 目录，以及同名的 `tar.gz`、`tar.bz2`、`tar.xz` 旧包。
 - 如果不加这个参数，而目标目录已经存在，构建会直接报错，避免误覆盖旧产物。
+
+关于 `2.10`：
+
+- `2.10` 这一代在 PyPI 上的官方包名是 `ansible-base`。
+- 从 `2.11` 开始，官方包名才是 `ansible-core`。
+- 也就是说，`2.10.17` 要写成 `ansible-base==2.10.17`。
 
 ## `install-extras.sh`
 
@@ -91,6 +109,32 @@
 - `--wheelhouse`: 指定本地 wheel 目录。
 - `--offline`: 不访问 PyPI。通常要配合 `--wheelhouse` 或本地包文件使用。
 
+这个命令的文本输出现在会优先显示“官方控制机最低 Python 版本”和官方文档链接，而不是直接把原始 `Requires-Python` 字符串抛给你。
+
+这份映射表维护在 [data/ansible_control_node_python.json](/usr/local/make_ansible_portable/data/ansible_control_node_python.json)。
+
+## `freeze-build-lock.sh`
+
+用途：解析某个 Ansible 版本在指定控制机 Python 下最终会安装哪些包，并把结果写成一个 constraints 文件，后续 `build.sh` 可直接复用。
+
+常见用法：
+
+```bash
+./freeze-build-lock.sh \
+  --python /usr/bin/python3.6 \
+  --source ansible-base==2.10.17 \
+  --output locks/ansible-base-2.10.17-py36.txt
+```
+
+参数说明：
+
+- `--source`: 必填。官方包来源。
+- `--output`: 必填。输出锁文件路径。
+- `--build-constraint`: 可选。允许在已有约束基础上继续解析。
+- `--python`: 指定控制机 Python。这个参数最关键。
+- `--wheelhouse`: 指定本地 wheel 目录。
+- `--offline`: 不访问 PyPI。通常要配合 `--wheelhouse` 或本地包文件使用。
+
 ## `refresh-tested-matrix.sh`
 
 用途：从 `2.10` 开始批量测试每个 minor 的最后一个小版本，并刷新 README 里的测试矩阵。
@@ -130,3 +174,24 @@
 - `--python`: 切换构建使用的 Python
 - `--extra-package` / `--extra-requirements`: 把第三方 Python 包打进 `extras`
 - `--offline` / `--wheelhouse`: 离线或半离线构建
+
+## 控制机 Python vs 目标机 Python
+
+这里有两个经常混淆的概念：
+
+- 控制机 Python：运行便携包的 Python，也就是 `python3 ./ansible` 使用的那个 Python。
+- 目标机 Python：Ansible 连上远程主机后，远程模块在目标机上使用的 Python。
+
+`--python` 影响的是控制机这一侧：
+
+- 它决定 `pip` 解析依赖时按照哪个 Python 版本选包
+- 它也决定构建后的 `localhost -m ping` 自测使用哪个 Python
+
+如果你希望便携包在只有 `Python 3.6` 的控制机上运行，就应该用 `--python /path/to/python3.6` 来构建。
+
+构建完成后，可以直接看 bundle 根目录下的 `portable-manifest.json`：
+
+- `.python`：构建时使用的控制机 Python
+- `.installed_distributions`：实际安装进 bundle 的包和版本
+
+如果你想把这一组依赖固定下来，先跑一次 `./freeze-build-lock.sh`，再把生成的文件通过 `--build-constraint` 传给 `./build.sh`。

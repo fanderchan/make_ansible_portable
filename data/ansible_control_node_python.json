@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "checked_on": "2026-03-29",
+  "entries": [
+    {
+      "minor": "2.10",
+      "package_name": "ansible-base",
+      "minimum_python3": "3.5",
+      "display": "Python 3.5+",
+      "official_text": "Python 2.7 or Python 3.5 - 3.9",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.10."
+    },
+    {
+      "minor": "2.11",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.5",
+      "display": "Python 3.5+",
+      "official_text": "Python 2.7 or Python 3.5 - 3.9",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.11.",
+      "note": "ansible-core 2.11 warns on controller Python lower than 3.8, but still documents Python 3.5+ support.",
+      "note_source_url": "https://docs.ansible.com/projects/ansible-core/devel/porting_guides/porting_guide_core_2.11.html#other"
+    },
+    {
+      "minor": "2.12",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.8",
+      "display": "Python 3.8+",
+      "official_text": "Python 3.8 - 3.10",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.12."
+    },
+    {
+      "minor": "2.13",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.8",
+      "display": "Python 3.8+",
+      "official_text": "Python 3.8 - 3.10",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.13."
+    },
+    {
+      "minor": "2.14",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.9",
+      "display": "Python 3.9+",
+      "official_text": "Python 3.9 - 3.11",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.14."
+    },
+    {
+      "minor": "2.15",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.9",
+      "display": "Python 3.9+",
+      "official_text": "Python 3.9 - 3.11",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.15."
+    },
+    {
+      "minor": "2.16",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.10",
+      "display": "Python 3.10+",
+      "official_text": "Python 3.10 - 3.12",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.16."
+    },
+    {
+      "minor": "2.17",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.10",
+      "display": "Python 3.10+",
+      "official_text": "Python 3.10 - 3.12",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.17."
+    },
+    {
+      "minor": "2.18",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.11",
+      "display": "Python 3.11+",
+      "official_text": "Python 3.11 - 3.13",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.18."
+    },
+    {
+      "minor": "2.19",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.11",
+      "display": "Python 3.11+",
+      "official_text": "Python 3.11 - 3.13",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.19."
+    },
+    {
+      "minor": "2.20",
+      "package_name": "ansible-core",
+      "minimum_python3": "3.12",
+      "display": "Python 3.12+",
+      "official_text": "Python 3.12 - 3.14",
+      "source_url": "https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html#ansible-core-support-matrix",
+      "source_note": "Ansible Core support matrix, Control Node Python column for 2.20."
+    }
+  ]
+}
