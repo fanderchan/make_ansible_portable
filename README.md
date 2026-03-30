@@ -336,6 +336,7 @@ jq '.python,.installed_distributions' dist/portable-ansible-base-2.10.17/portabl
 
 ## 发布记录
 
+- 当前最新版本：`v0.2.0`
 - 首个公开版本：`v0.1.0`
 - 变更记录见 [CHANGELOG.md](CHANGELOG.md)
 - 安全说明见 [SECURITY.md](SECURITY.md)
