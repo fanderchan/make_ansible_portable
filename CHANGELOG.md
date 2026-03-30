@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic
 Versioning.
 
+## [0.3.0] - 2026-03-30
+
+### Added
+
+- Support for installing Ansible collections into the portable bundle at build
+  time via `--extra-collection` and `--extra-collection-requirements`.
+- `install-collections.sh` for adding collections to an existing unpacked
+  bundle after the initial build.
+- Automatic collection-path activation in the portable launcher so bundled
+  collections under `./collections` are visible to `ansible-playbook`,
+  `ansible-doc`, and `ansible-galaxy`.
+- Collection install tracking in `portable-manifest.json`.
+
+### Changed
+
+- Documented that collection compatibility must be checked explicitly against
+  the target Ansible version and deployment scenario instead of assuming the
+  latest collection release will fit older control-node or managed-node setups.
+- Updated the collection example to pin `ansible.posix:==1.5.4` for
+  conservative compatibility with `ansible-base 2.10.x` workflows.
+
 ## [0.2.0] - 2026-03-30
 
 ### Added

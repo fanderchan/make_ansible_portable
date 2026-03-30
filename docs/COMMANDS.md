@@ -1,9 +1,10 @@
 # 命令行参数参考
 
-这个项目主要有 4 个入口脚本：
+这个项目主要有 7 个入口脚本：
 
 - `./build.sh`
 - `./install-extras.sh`
+- `./install-collections.sh`
 - `./inspect-source.sh`
 - `./freeze-build-lock.sh`
 - `./prepare-build-python.sh`
@@ -14,6 +15,7 @@
 ```bash
 ./build.sh --help
 ./install-extras.sh --help
+./install-collections.sh --help
 ./inspect-source.sh --help
 ./freeze-build-lock.sh --help
 ./prepare-build-python.sh --help
@@ -59,6 +61,8 @@
 - `--extra-package`: 在构建时顺便安装额外的 Python 包到 `ansible/extras`。可重复。
 - `--extra-requirements`: 在构建时顺便安装 requirements 文件里的额外 Python 包。可重复。
 - `--constraint`: extras 安装时使用的 pip constraints 文件。
+- `--extra-collection`: 在构建时顺便安装额外的 Ansible collection 到 `./collections`。可重复。
+- `--extra-collection-requirements`: 在构建时顺便安装 collection requirements.yml 到 `./collections`。可重复。
 
 关于 `--clean-output`：
 
@@ -106,6 +110,14 @@
 - 删除后，`PyYAML` 会自动回退到纯 Python 实现，功能还在，只是 YAML 解析/输出速度会慢一些。
 - 它和 `_cffi_backend*.so` 不是同一类东西。后者不是“纯加速器”，只要还保留 `cryptography/cffi`，就不能单独删。
 
+关于 collection：
+
+- `ansible.posix`、`community.mysql` 这类是 Ansible collection，不是 Python 包。
+- 这些内容会安装到 bundle 根目录的 `./collections`，而不是 `ansible/extras`。
+- 便携入口运行时会自动把 `./collections` 加入 `ANSIBLE_COLLECTIONS_PATH` 和 `ANSIBLE_COLLECTIONS_PATHS`。
+- 工具当前不会自动按 `--python`、受控端 Python 版本、或旧版 `ansible-base/ansible-core` 去回退到“最后兼容”的 collection 版本。
+- 对老环境，更稳的做法是自己核对上游 `requires_ansible` 和发布说明，并显式 pin 版本。
+
 ## `install-extras.sh`
 
 用途：对已经生成的便携包，追加安装第三方 Python 包到 `ansible/extras`。
@@ -128,6 +140,34 @@
 - `--extra-package`: 追加安装单个 Python 包。可重复。
 - `--extra-requirements`: 追加安装 requirements 文件。可重复。
 - `--constraint`: extras 安装时使用的 pip constraints 文件。
+
+## `install-collections.sh`
+
+用途：对已经生成的便携包，追加安装 Ansible collection 到 bundle 根目录的 `collections/`。
+
+常见用法：
+
+```bash
+./install-collections.sh \
+  --bundle dist/portable-ansible-base-2.10.17 \
+  --extra-collection 'ansible.posix:==1.5.4'
+```
+
+或者：
+
+```bash
+./install-collections.sh \
+  --bundle dist/portable-ansible-core-2.15.13 \
+  --extra-collection-requirements examples/collections-posix.yml
+```
+
+参数说明：
+
+- `--bundle`: 必填。已解压便携包目录。
+- `--self-test`: collection 安装完成后，自动跑一次 `ansible-galaxy collection list`。
+- `--python`: 指定运行 bundle 内 `ansible-galaxy` 时使用的 Python 解释器。
+- `--extra-collection`: 追加安装单个 collection 规格。可重复。
+- `--extra-collection-requirements`: 追加安装 collection requirements.yml。可重复。
 
 ## `inspect-source.sh`
 

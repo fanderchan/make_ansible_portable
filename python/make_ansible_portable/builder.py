@@ -42,6 +42,8 @@ VAULT_COMMAND = "ansible-vault"
 VAULT_RUNTIME_DISTRIBUTIONS = ("cryptography", "cffi", "pycparser", "typing-extensions")
 VAULT_RUNTIME_PATHS = ("cryptography", "cffi", "pycparser", "typing_extensions.py", "_cffi_backend*.so")
 YAML_C_EXTENSION_PATTERNS = ("yaml/_yaml*.so",)
+COLLECTIONS_DIRNAME = "collections"
+COLLECTIONS_ENV_VARS = ("ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_COLLECTIONS_PATHS")
 
 
 class BuildError(RuntimeError):
@@ -105,6 +107,12 @@ class BuildResult(object):
 class ExtrasInstallResult(object):
     def __init__(self, extras_dir, manifest_path):
         self.extras_dir = extras_dir
+        self.manifest_path = manifest_path
+
+
+class CollectionInstallResult(object):
+    def __init__(self, collections_dir, manifest_path):
+        self.collections_dir = collections_dir
         self.manifest_path = manifest_path
 
 
@@ -341,16 +349,38 @@ def _default_lock_output_path(metadata, python_info):
     return (PROJECT_ROOT / "locks" / _builtin_lock_filename(metadata, python_info)).resolve()
 
 
-def _run(cmd, cwd=None):
+def _run(cmd, cwd=None, env=None):
     try:
         subprocess.run(
             cmd,
             cwd=str(cwd) if cwd else None,
+            env=env,
             check=True,
             universal_newlines=True,
         )
     except subprocess.CalledProcessError as exc:
-        raise BuildError(f"Command failed ({exc.returncode}): {' '.join(cmd)}") from exc
+        rendered = " ".join(str(part) for part in cmd)
+        raise BuildError(f"Command failed ({exc.returncode}): {rendered}") from exc
+
+
+def _prepend_path_entry(env, variable_name, preferred_path):
+    normalized_preferred = os.path.normpath(preferred_path)
+    entries = [preferred_path]
+    for raw_entry in env.get(variable_name, "").split(os.pathsep):
+        if not raw_entry:
+            continue
+        if os.path.normpath(raw_entry) == normalized_preferred:
+            continue
+        entries.append(raw_entry)
+    env[variable_name] = os.pathsep.join(entries)
+
+
+def _bundle_collection_env(bundle_dir):
+    env = os.environ.copy()
+    collections_dir = str((bundle_dir / COLLECTIONS_DIRNAME).resolve())
+    for variable_name in COLLECTIONS_ENV_VARS:
+        _prepend_path_entry(env, variable_name, collections_dir)
+    return env
 
 
 def _sanitize_name(value):
@@ -767,6 +797,46 @@ def _install_with_pip(
     _run(cmd)
 
 
+def _install_with_ansible_galaxy(python_bin, bundle_dir, collections_dir, collection_specs=None, requirement_files=None):
+    collection_specs = collection_specs or []
+    requirement_files = requirement_files or []
+    if not collection_specs and not requirement_files:
+        return
+
+    bundle_env = _bundle_collection_env(bundle_dir)
+    galaxy_entrypoint = bundle_dir / "ansible-galaxy"
+    collections_dir.mkdir(parents=True, exist_ok=True)
+
+    for requirement_file in requirement_files:
+        _run(
+            [
+                python_bin,
+                str(galaxy_entrypoint),
+                "collection",
+                "install",
+                "-p",
+                str(collections_dir),
+                "-r",
+                str(requirement_file),
+            ],
+            env=bundle_env,
+        )
+
+    if collection_specs:
+        _run(
+            [
+                python_bin,
+                str(galaxy_entrypoint),
+                "collection",
+                "install",
+                "-p",
+                str(collections_dir),
+                *collection_specs,
+            ],
+            env=bundle_env,
+        )
+
+
 def _discover_ansible_commands(ansible_dir):
     entry_points = sorted(ansible_dir.glob("*.dist-info/entry_points.txt"))
     if not entry_points:
@@ -822,6 +892,13 @@ def _write_quickstart(bundle_dir, commands, metadata, without_vault=False, witho
             "",
             "Project helper example (run from make_ansible_portable project root):",
             "  ./install-extras.sh --bundle /path/to/unpacked-bundle --extra-requirements requirements.txt",
+            "",
+            "Ansible collections can be installed into ./collections.",
+            "Manual example:",
+            "  python3 ./ansible-galaxy collection install -p ./collections ansible.posix:==1.5.4",
+            "",
+            "Project helper example (run from make_ansible_portable project root):",
+            "  ./install-collections.sh --bundle /path/to/unpacked-bundle --extra-collection ansible.posix:==1.5.4",
         ]
     )
     quickstart.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -932,6 +1009,7 @@ def _write_manifest(
     python_info,
     build_python_tools,
     build_extras,
+    build_collections,
     installed_distributions,
     build_options,
 ):
@@ -955,10 +1033,13 @@ def _write_manifest(
             "commands": commands,
             "ansible_dir": "ansible",
             "extras_dir": "ansible/extras",
+            "collections_dir": COLLECTIONS_DIRNAME,
         },
         "build_extras": build_extras,
+        "build_collections": build_collections,
         "installed_distributions": installed_distributions,
         "extra_installs": [],
+        "collection_installs": [],
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return manifest_path
@@ -980,6 +1061,13 @@ def _compile_launcher(python_bin, ansible_dir):
 
 def _self_test_bundle(python_bin, bundle_dir):
     _run([python_bin, str(bundle_dir / "ansible"), "localhost", "-m", "ping"])
+
+
+def _self_test_collections(python_bin, bundle_dir):
+    _run(
+        [python_bin, str(bundle_dir / "ansible-galaxy"), "collection", "list"],
+        env=_bundle_collection_env(bundle_dir),
+    )
 
 
 def _create_archive(bundle_dir, compression):
@@ -1058,9 +1146,11 @@ def build_portable_bundle(args):
         stage_root = temp_root / bundle_name
         ansible_dir = stage_root / "ansible"
         extras_dir = ansible_dir / "extras"
+        collections_dir = stage_root / COLLECTIONS_DIRNAME
         stage_root.mkdir(parents=True)
         ansible_dir.mkdir()
         extras_dir.mkdir()
+        collections_dir.mkdir()
 
         launcher_src = TEMPLATES_DIR / "__main__.py"
         if not launcher_src.exists():
@@ -1093,8 +1183,16 @@ def build_portable_bundle(args):
             )
 
         commands = _filter_bundle_commands(_discover_ansible_commands(ansible_dir), args.without_vault)
-        installed_distributions = _collect_installed_distributions(ansible_dir)
         _create_command_symlinks(stage_root, commands)
+        if args.extra_collection or args.extra_collection_requirements:
+            _install_with_ansible_galaxy(
+                python_bin=args.python,
+                bundle_dir=stage_root,
+                collections_dir=collections_dir,
+                collection_specs=args.extra_collection,
+                requirement_files=args.extra_collection_requirements,
+            )
+        installed_distributions = _collect_installed_distributions(ansible_dir)
         _write_quickstart(
             stage_root,
             commands,
@@ -1120,6 +1218,10 @@ def build_portable_bundle(args):
                 "packages": args.extra_package,
                 "requirement_files": [str(path) for path in args.extra_requirements],
                 "constraint_file": str(args.constraint) if args.constraint else None,
+            },
+            build_collections={
+                "collections": args.extra_collection,
+                "requirement_files": [str(path) for path in args.extra_collection_requirements],
             },
             installed_distributions=installed_distributions,
             build_options={
@@ -1182,16 +1284,18 @@ def _bundle_paths(bundle_dir):
     bundle_root = bundle_dir.resolve()
     ansible_dir = bundle_root / "ansible"
     extras_dir = ansible_dir / "extras"
+    collections_dir = bundle_root / COLLECTIONS_DIRNAME
     manifest_path = bundle_root / MANIFEST_FILE
     if not ansible_dir.is_dir():
         raise BuildError(f"Invalid bundle. Missing directory: {ansible_dir}")
     extras_dir.mkdir(parents=True, exist_ok=True)
-    return ansible_dir, extras_dir, manifest_path
+    collections_dir.mkdir(parents=True, exist_ok=True)
+    return ansible_dir, extras_dir, collections_dir, manifest_path
 
 
 def install_bundle_extras(args):
     bundle_dir = args.bundle.resolve()
-    _, extras_dir, manifest_path = _bundle_paths(bundle_dir)
+    _, extras_dir, _, manifest_path = _bundle_paths(bundle_dir)
     prepared = _prepare_build_python(args.python, args.wheelhouse, args.offline)
 
     if not args.extra_package and not args.extra_requirements:
@@ -1223,3 +1327,35 @@ def install_bundle_extras(args):
         _self_test_bundle(args.python, bundle_dir)
 
     return ExtrasInstallResult(extras_dir=extras_dir, manifest_path=manifest_path)
+
+
+def install_bundle_collections(args):
+    bundle_dir = args.bundle.resolve()
+    _, _, collections_dir, manifest_path = _bundle_paths(bundle_dir)
+
+    if not args.extra_collection and not args.extra_collection_requirements:
+        raise BuildError("Nothing to install. Provide --extra-collection and/or --extra-collection-requirements.")
+
+    _install_with_ansible_galaxy(
+        python_bin=args.python,
+        bundle_dir=bundle_dir,
+        collections_dir=collections_dir,
+        collection_specs=args.extra_collection,
+        requirement_files=args.extra_collection_requirements,
+    )
+
+    manifest = _load_manifest(manifest_path)
+    installs = manifest.setdefault("collection_installs", [])
+    installs.append(
+        {
+            "installed_at": datetime.now(timezone.utc).isoformat(),
+            "collections": args.extra_collection,
+            "requirement_files": [str(path) for path in args.extra_collection_requirements],
+        }
+    )
+    _save_manifest(manifest_path, manifest)
+
+    if args.self_test:
+        _self_test_collections(args.python, bundle_dir)
+
+    return CollectionInstallResult(collections_dir=collections_dir, manifest_path=manifest_path)

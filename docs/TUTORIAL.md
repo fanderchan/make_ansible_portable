@@ -203,6 +203,7 @@ cd make_ansible_portable
 dist/
   portable-ansible-core-2.15.13/
     ansible/
+    collections/
     ansible-config -> ansible
     ansible-console -> ansible
     ansible-doc -> ansible
@@ -301,6 +302,71 @@ requirements 文件：
 ```
 
 安装完成后，信息会记录进 `portable-manifest.json`。
+
+### `ansible.posix` 这类不是 Python 包
+
+像 `ansible.posix`、`community.mysql`、`kubernetes.core` 这些都属于 Ansible collection，不会安装到 `ansible/extras/`。
+
+它们会安装到便携包根目录的 `collections/`，实际目录结构类似：
+
+```text
+dist/portable-ansible-core-2.15.13/
+  collections/
+    ansible_collections/
+      ansible/
+        posix/
+```
+
+便携入口运行时会自动把这个 `collections/` 路径加入 `ANSIBLE_COLLECTIONS_PATH` 和 `ANSIBLE_COLLECTIONS_PATHS`。
+
+注意这里要分清：
+
+- `--python /usr/bin/python3.6` 约束的是控制机 Python 和主 Ansible 依赖解析。
+- 它不会自动帮你挑出“支持某个受控端 Python 版本的最大 collection 版本”。
+- 对 collection，你还是要自己核对 `requires_ansible`、release note，以及实际模块场景。
+
+如果你是为了兼容 `ansible-base 2.10.x` 这种老环境，建议显式 pin collection 版本。
+
+### 如何把 collection 打进 bundle
+
+构建时直接打进去：
+
+```bash
+./build.sh \
+  --source ansible-base==2.10.17 \
+  --extra-collection 'ansible.posix:==1.5.4'
+```
+
+或者用 requirements 文件：
+
+```bash
+./build.sh \
+  --source ansible-core==2.15.13 \
+  --extra-collection-requirements examples/collections-posix.yml
+```
+
+对已生成便携包追加安装：
+
+```bash
+./install-collections.sh \
+  --bundle dist/portable-ansible-base-2.10.17 \
+  --extra-collection 'ansible.posix:==1.5.4'
+```
+
+### `ansible.posix` 常见验证方式
+
+安装完成后可以先列出 collection：
+
+```bash
+cd dist/portable-ansible-base-2.10.17
+python3 ./ansible-galaxy collection list
+```
+
+再确认 `ansible-doc` 能直接发现 collection 里的模块：
+
+```bash
+python3 ./ansible-doc ansible.posix.synchronize
+```
 
 ## 7. 常见 extras 示例
 

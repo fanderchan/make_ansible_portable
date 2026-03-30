@@ -9,6 +9,7 @@ from .builder import (
     build_portable_bundle,
     freeze_build_lock,
     inspect_source,
+    install_bundle_collections,
     install_bundle_extras,
     prepare_build_python,
 )
@@ -50,6 +51,22 @@ def _add_extras_options(parser):
         "--constraint",
         type=Path,
         help="Optional pip constraints file used when installing extras.",
+    )
+
+
+def _add_collection_options(parser):
+    parser.add_argument(
+        "--extra-collection",
+        action="append",
+        default=[],
+        help="Extra Ansible collection installed into ./collections. Can be repeated. Example: ansible.posix:==1.5.4 or /tmp/ansible-posix-1.5.4.tar.gz",
+    )
+    parser.add_argument(
+        "--extra-collection-requirements",
+        action="append",
+        default=[],
+        type=Path,
+        help="Ansible Galaxy collection requirements.yml installed into ./collections. Can be repeated.",
     )
 
 
@@ -128,6 +145,7 @@ def build_parser():
     )
     _add_pip_options(build)
     _add_extras_options(build)
+    _add_collection_options(build)
 
     extras = subparsers.add_parser(
         "install-extras",
@@ -146,6 +164,28 @@ def build_parser():
     )
     _add_pip_options(extras)
     _add_extras_options(extras)
+
+    collections = subparsers.add_parser(
+        "install-collections",
+        help="Install Ansible collections into an existing portable bundle.",
+    )
+    collections.add_argument(
+        "--bundle",
+        required=True,
+        type=Path,
+        help="Path to the unpacked portable bundle directory.",
+    )
+    collections.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run 'ansible-galaxy collection list' after installing collections.",
+    )
+    collections.add_argument(
+        "--python",
+        default=sys.executable,
+        help="Python executable used to run the bundled ansible-galaxy command. Default: current interpreter.",
+    )
+    _add_collection_options(collections)
 
     inspect_cmd = subparsers.add_parser(
         "inspect-source",
@@ -267,6 +307,14 @@ def main(argv=None):
         if args.command == "install-extras":
             result = install_bundle_extras(args)
             print(f"Extras target:     {result.extras_dir}")
+            if args.self_test:
+                print("Self-test:         OK")
+            print(f"Manifest:          {result.manifest_path}")
+            return 0
+
+        if args.command == "install-collections":
+            result = install_bundle_collections(args)
+            print(f"Collections target: {result.collections_dir}")
             if args.self_test:
                 print("Self-test:         OK")
             print(f"Manifest:          {result.manifest_path}")

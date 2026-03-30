@@ -42,6 +42,7 @@ PATH_SUFFIX_BLOCKLIST = {
     "lib-tk",
     "gtk-2.0",
 }
+COLLECTIONS_ENV_VARS = ("ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_COLLECTIONS_PATHS")
 
 
 class LauncherError(RuntimeError):
@@ -88,6 +89,24 @@ def _filtered_sys_path(bundle_root):
 
 def _activate_bundle_imports(bundle_root: Path) -> None:
     sys.path[:] = _filtered_sys_path(bundle_root)
+
+
+def _prepend_env_path(variable_name: str, preferred_path: str) -> None:
+    normalized_preferred = os.path.normpath(preferred_path)
+    entries = [preferred_path]
+    for raw_entry in os.environ.get(variable_name, "").split(os.pathsep):
+        if not raw_entry:
+            continue
+        if os.path.normpath(raw_entry) == normalized_preferred:
+            continue
+        entries.append(raw_entry)
+    os.environ[variable_name] = os.pathsep.join(entries)
+
+
+def _activate_bundle_collection_path(bundle_root: Path) -> None:
+    collections_text = os.path.normpath(str(bundle_root.parent / "collections"))
+    for variable_name in COLLECTIONS_ENV_VARS:
+        _prepend_env_path(variable_name, collections_text)
 
 
 def _load_attribute(module_name: str, attribute_name: str):
@@ -146,6 +165,7 @@ def _cleanup_ansible_tempdir() -> None:
 def main() -> int:
     bundle_root = _bundle_root()
     _activate_bundle_imports(bundle_root)
+    _activate_bundle_collection_path(bundle_root)
     command_name = _normalized_command_name(os.path.basename(sys.argv[0]))
 
     try:

@@ -204,6 +204,8 @@ jq '.python,.installed_distributions' dist/portable-ansible-base-2.10.17/portabl
 
 ## 第三方 Python 包注入
 
+注意：这里说的是 Python 依赖，不是 `ansible.posix` 这种 Ansible collection。
+
 构建时直接打进去：
 
 ```bash
@@ -219,6 +221,49 @@ jq '.python,.installed_distributions' dist/portable-ansible-base-2.10.17/portabl
 ./install-extras.sh \
   --bundle dist/portable-ansible-core-2.15.13 \
   --extra-requirements examples/extras-k8s.txt
+```
+
+## Ansible Collection 注入
+
+`ansible.posix`、`community.mysql` 这类内容属于 Ansible collection，不会装进 `ansible/extras/`。
+
+从当前版本开始，工具支持把 collection 安装到便携包根目录的 `collections/` 下。运行便携包时，会自动把这个路径加入 `ANSIBLE_COLLECTIONS_PATH` 和 `ANSIBLE_COLLECTIONS_PATHS`。
+
+注意：工具不会根据 `--python`、受控端 `Python 2.7`、或旧版 `ansible-base/ansible-core` 自动帮你挑出“最后一个兼容 collection 版本”。
+你需要自己检查 collection 的 `requires_ansible`、上游发布说明，以及你实际要跑的模块/插件场景。
+
+如果你的目标是 `ansible-base 2.10.x` 这类偏老环境，文档示例统一建议显式 pin 版本，而不是直接装 latest。
+
+构建时直接打进去：
+
+```bash
+./build.sh \
+  --source ansible-base==2.10.17 \
+  --extra-collection 'ansible.posix:==1.5.4'
+```
+
+或者用 requirements 文件：
+
+```bash
+./build.sh \
+  --source ansible-core==2.15.13 \
+  --extra-collection-requirements examples/collections-posix.yml
+```
+
+构建后再追加安装：
+
+```bash
+./install-collections.sh \
+  --bundle dist/portable-ansible-base-2.10.17 \
+  --extra-collection 'ansible.posix:==1.5.4'
+```
+
+装完后可以这样确认：
+
+```bash
+cd dist/portable-ansible-base-2.10.17
+python3 ./ansible-galaxy collection list
+python3 ./ansible-doc ansible.posix.synchronize
 ```
 
 ## 一键刷新测试矩阵
@@ -317,12 +362,13 @@ jq '.python,.installed_distributions' dist/portable-ansible-base-2.10.17/portabl
 
 - `build.sh`: 主构建入口
 - `install-extras.sh`: 给已构建便携包追加第三方 Python 包
+- `install-collections.sh`: 给已构建便携包追加 Ansible collection
 - `inspect-source.sh`: 读取官方包元数据和运行时依赖
 - `freeze-build-lock.sh`: 解析并生成主依赖锁文件
 - `refresh-tested-matrix.sh`: 批量测试每个 minor 的末版并刷新 README 矩阵
 - `python/make_ansible_portable/`: Python 实现
 - `templates/__main__.py`: 便携入口模板
-- `examples/`: 常见 extras 示例
+- `examples/`: 常见 extras 和 collection 示例
 - `locks/`: 可复现构建用的约束文件示例
 - `docs/COMMANDS.md`: 命令行参数参考
 - `docs/TUTORIAL.md`: 完整教程
@@ -336,7 +382,7 @@ jq '.python,.installed_distributions' dist/portable-ansible-base-2.10.17/portabl
 
 ## 发布记录
 
-- 当前最新版本：`v0.2.0`
+- 当前最新版本：`v0.3.0`
 - 首个公开版本：`v0.1.0`
 - 变更记录见 [CHANGELOG.md](CHANGELOG.md)
 - 安全说明见 [SECURITY.md](SECURITY.md)
