@@ -16,7 +16,7 @@
 - If you add optional extras examples, make sure they install cleanly into
   `ansible/extras`.
 - If you touch licensing or attribution text, keep `LICENSE`, `NOTICE`,
-  `README.md`, and `ACKNOWLEDGEMENTS.md` consistent.
+  `README.md`, `README.zh-CN.md`, and `ACKNOWLEDGEMENTS.md` consistent.
 
 ## Pull Request Checklist
 

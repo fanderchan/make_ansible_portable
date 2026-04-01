@@ -190,7 +190,7 @@
 
 这个命令的文本输出现在会优先显示“官方控制机最低 Python 版本”和官方文档链接，而不是直接把原始 `Requires-Python` 字符串抛给你。
 
-这份映射表维护在 [data/ansible_control_node_python.json](/usr/local/make_ansible_portable/data/ansible_control_node_python.json)。
+这份映射表维护在 [data/ansible_control_node_python.json](../data/ansible_control_node_python.json)。
 
 ## `freeze-build-lock.sh`
 
@@ -254,7 +254,7 @@ locks/ansible-base-2.10.17-py36.txt
 
 - `--start-minor`: 起始 minor。默认是 `2.10`。
 - `--end-minor`: 可选结束 minor。不写时自动测到 PyPI 当前最新稳定 minor。
-- `--readme`: 要被重写测试矩阵的 README 文件。默认是 `README.md`。
+- `--readme`: 要被重写测试矩阵的 README 文件。默认是英文主文档 `README.md`。如果传 `README.zh-CN.md` 这类文件名，生成的矩阵文案会自动使用中文。
 - `--output-dir`: 批量测试过程中临时 bundle 的输出目录。默认是 `dist-tests/`。
 - `--results-json`: JSON 结果输出路径。默认是 `<output-dir>/tested-matrix.json`。
 - `--python-candidate`: 候选 Python 解释器。可重复。

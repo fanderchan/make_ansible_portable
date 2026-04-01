@@ -220,7 +220,10 @@ def build_parser():
         "--readme",
         default=Path("README.md"),
         type=Path,
-        help="README file whose tested-matrix section will be rewritten. Default: ./README.md",
+        help=(
+            "README file whose tested-matrix section will be rewritten. "
+            "Default: ./README.md (English). Files such as ./README.zh-CN.md render Chinese labels."
+        ),
     )
     refresh.add_argument(
         "--output-dir",
@@ -349,10 +352,10 @@ def main(argv=None):
             return 0
 
         if args.command == "refresh-tested-matrix":
-            from .matrix import refresh_tested_matrix
+            from .matrix import STATUS_PASSED, refresh_tested_matrix
 
             result = refresh_tested_matrix(args)
-            passed = sum(1 for entry in result.entries if entry.status == "已测通过")
+            passed = sum(1 for entry in result.entries if entry.status == STATUS_PASSED)
             print(f"README:            {result.readme_path}")
             print(f"Results JSON:      {result.results_json_path}")
             print(f"Passed minors:     {passed}/{len(result.entries)}")

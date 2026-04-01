@@ -49,7 +49,7 @@ python3 --version
 
 那你就应该用 `Python 3.6` 来构建。原因很简单：当前工具会用你指定的 Python 去做 `pip install` 和自测，依赖版本会跟着那个 Python 的兼容范围来选。
 
-构建前用于判断“这个版本最低该用什么控制机 Python”的映射表，维护在 [data/ansible_control_node_python.json](/usr/local/make_ansible_portable/data/ansible_control_node_python.json)。这份表是按 Ansible 官方文档整理出来的，用户输出优先读它，不再直接展示难看的 `Requires-Python` 原始字符串。
+构建前用于判断“这个版本最低该用什么控制机 Python”的映射表，维护在 [data/ansible_control_node_python.json](../data/ansible_control_node_python.json)。这份表是按 Ansible 官方文档整理出来的，用户输出优先读它，不再直接展示难看的 `Requires-Python` 原始字符串。
 
 对 `build.sh` 来说，最关键的两个参数就是：
 
@@ -429,7 +429,7 @@ python3 ./ansible-doc ansible.posix.synchronize
 2. 读取每个官方包的 `Requires-Python`
 3. 从你提供的 `--python-candidate` 里自动挑一个能跑这个 minor 的解释器
 4. 对每个版本执行一次真实构建和 `localhost -m ping` 自测
-5. 重写 `README.md` 里的矩阵，并把明细写入 `dist-tests/tested-matrix.json`
+5. 默认重写英文主文档 `README.md` 里的矩阵，并把明细写入 `dist-tests/tested-matrix.json`
 
 如果解释器不在 `PATH`，就直接给绝对路径：
 
@@ -534,7 +534,7 @@ python3 -m pip download -d /tmp/wheelhouse -r examples/extras-k8s.txt
 
 - `--start-minor`: 起始 minor，默认 `2.10`
 - `--end-minor`: 可选结束 minor，不写时自动测到 PyPI 当前最新稳定 minor
-- `--readme`: 要被重写矩阵的 README，默认 `README.md`
+- `--readme`: 要被重写矩阵的 README，默认英文主文档 `README.md`；如果传 `README.zh-CN.md` 这类文件名，生成的矩阵文案会自动切成中文
 - `--output-dir`: 批量测试输出目录，默认 `dist-tests`
 - `--results-json`: JSON 结果输出路径，默认 `dist-tests/tested-matrix.json`
 - `--python-candidate`: 候选 Python，可重复

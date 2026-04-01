@@ -25,6 +25,11 @@ AUTO_DISCOVER_PYTHONS = (
 )
 README_BEGIN_MARKER = "<!-- BEGIN TESTED MATRIX -->"
 README_END_MARKER = "<!-- END TESTED MATRIX -->"
+README_LANGUAGE_EN = "en"
+README_LANGUAGE_ZH_CN = "zh-CN"
+STATUS_PASSED = "passed"
+STATUS_BUILD_FAILED = "build_failed"
+STATUS_MISSING_PYTHON = "missing_python"
 PYPI_PROJECT_JSON = "https://pypi.org/pypi/{package}/json"
 PYPI_RELEASE_JSON = "https://pypi.org/pypi/{package}/{version}/json"
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
@@ -74,7 +79,7 @@ class MatrixRefreshResult:
 
     @property
     def all_passed(self) -> bool:
-        return all(entry.status == "已测通过" for entry in self.entries)
+        return all(entry.status == STATUS_PASSED for entry in self.entries)
 
 
 def _fetch_json(url: str) -> dict[str, object]:
@@ -101,6 +106,13 @@ def _parse_minor(value: str) -> tuple[int, int]:
 
 def _format_minor(value: tuple[int, int]) -> str:
     return f"{value[0]}.{value[1]}"
+
+
+def _detect_readme_language(readme_path: Path) -> str:
+    name = readme_path.name.lower()
+    if ".zh" in name or "zh-cn" in name or "zh_cn" in name:
+        return README_LANGUAGE_ZH_CN
+    return README_LANGUAGE_EN
 
 
 def _parse_version_tuple(value: str) -> tuple[int, int, int] | None:
@@ -343,13 +355,18 @@ def _build_release(
         skip_archive=True,
         skip_self_test=False,
         build_constraint=None,
+        no_auto_build_constraint=False,
         strip_metadata=False,
+        without_vault=False,
+        without_yaml_c_extension=False,
         python=python_candidate.executable,
         wheelhouse=wheelhouse,
         offline=offline,
         extra_package=[],
         extra_requirements=[],
         constraint=None,
+        extra_collection=[],
+        extra_collection_requirements=[],
     )
 
     try:
@@ -358,7 +375,7 @@ def _build_release(
             minor=release.minor,
             package=release.package,
             version=release.version,
-            status="已测通过",
+            status=STATUS_PASSED,
             requires_python=release.requires_python,
             python_version=python_candidate.version_text,
             python_executable=python_candidate.executable,
@@ -373,7 +390,7 @@ def _build_release(
             minor=release.minor,
             package=release.package,
             version=release.version,
-            status="构建失败",
+            status=STATUS_BUILD_FAILED,
             requires_python=release.requires_python,
             python_version=python_candidate.version_text,
             python_executable=python_candidate.executable,
@@ -394,81 +411,150 @@ def _markdown_links(entry: MatrixEntry) -> str:
     return " · ".join(links)
 
 
-def _group_minors_by_python(entries: list[MatrixEntry]) -> list[str]:
+def _group_minors_by_python(entries: list[MatrixEntry]) -> list[tuple[str, list[str]]]:
     groups: dict[str, list[str]] = {}
     for entry in entries:
-        if entry.status != "已测通过" or not entry.python_version:
+        if entry.status != STATUS_PASSED or not entry.python_version:
             continue
         groups.setdefault(entry.python_version, []).append(entry.minor)
 
     def sort_key(version_text: str) -> tuple[int, int, int]:
         return _normalize_version(version_text)
 
-    lines: list[str] = []
+    lines: list[tuple[str, list[str]]] = []
     for version_text in sorted(groups, key=sort_key):
         minors = sorted(groups[version_text], key=_parse_minor)
+        lines.append((version_text, minors))
+    return lines
+
+
+def _render_environment_lines(
+    entries: list[MatrixEntry],
+    *,
+    language: str,
+) -> list[str]:
+    grouped = _group_minors_by_python(entries)
+    if not grouped:
+        if language == README_LANGUAGE_ZH_CN:
+            return ["- 当前没有任何版本通过测试"]
+        return ["- No versions passed in the current run"]
+
+    lines: list[str] = []
+    for version_text, minors in grouped:
         if len(minors) == 1:
             minor_text = minors[0]
-        else:
+        elif language == README_LANGUAGE_ZH_CN:
             minor_text = f"{minors[0]} 到 {minors[-1]}"
-        lines.append(f"- `Python {version_text}`：用于 `{minor_text}`")
+        else:
+            minor_text = f"{minors[0]} to {minors[-1]}"
+
+        if language == README_LANGUAGE_ZH_CN:
+            lines.append(f"- `Python {version_text}`：用于 `{minor_text}`")
+        else:
+            lines.append(f"- `Python {version_text}`: used for `{minor_text}`")
     return lines
 
 
 def _failure_notes(entries: list[MatrixEntry]) -> list[str]:
     notes: list[str] = []
     for entry in entries:
-        if entry.status == "已测通过" or not entry.note:
+        if entry.status == STATUS_PASSED or not entry.note:
             continue
         notes.append(f"- `{entry.minor}`: {entry.note}")
     return notes
+
+
+def _render_status(status: str, *, language: str) -> str:
+    if language == README_LANGUAGE_ZH_CN:
+        labels = {
+            STATUS_PASSED: "已测通过",
+            STATUS_BUILD_FAILED: "构建失败",
+            STATUS_MISSING_PYTHON: "缺少匹配 Python",
+        }
+    else:
+        labels = {
+            STATUS_PASSED: "Passed",
+            STATUS_BUILD_FAILED: "Build failed",
+            STATUS_MISSING_PYTHON: "No matching Python",
+        }
+    return labels.get(status, status)
 
 
 def _render_matrix_body(
     *,
     entries: list[MatrixEntry],
     results_json_display: str,
+    language: str,
 ) -> str:
     generated_date = datetime.now().date().isoformat()
-    environment_lines = _group_minors_by_python(entries)
-    if not environment_lines:
-        environment_lines = ["- 当前没有任何版本通过测试"]
+    environment_lines = _render_environment_lines(entries, language=language)
 
-    lines = [
-        "这段内容由 `./refresh-tested-matrix.sh` 自动生成。  ",
-        f"测试时间：{generated_date}",
-        "",
-        "测试环境：",
-        "",
-        *environment_lines,
-        "",
-        "判定标准：",
-        "",
-        "- `已测通过`：`./build.sh --source <spec> --python <matching-python> --skip-archive --clean-output` 成功",
-        "- 并且自动 `localhost -m ping` 自测成功",
-        "",
-        "说明：`2.10` 这一代官方包名还是 `ansible-base`，从 `2.11` 起才是 `ansible-core`。",
-        "",
-        "| Minor | Package | Final patch | 状态 | 测试 Python | Requires-Python | 官方下载 |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
-    ]
+    if language == README_LANGUAGE_ZH_CN:
+        lines = [
+            "这段内容由 `./refresh-tested-matrix.sh` 自动生成。  ",
+            f"测试时间：{generated_date}",
+            "",
+            "测试环境：",
+            "",
+            *environment_lines,
+            "",
+            "判定标准：",
+            "",
+            "- `已测通过`：`./build.sh --source <spec> --python <matching-python> --skip-archive --clean-output` 成功",
+            "- 并且自动 `localhost -m ping` 自测成功",
+            "",
+            "说明：`2.10` 这一代官方包名还是 `ansible-base`，从 `2.11` 起才是 `ansible-core`。",
+            "",
+            "| Minor | Package | Final patch | 状态 | 测试 Python | Requires-Python | 官方下载 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    else:
+        lines = [
+            "Generated by `./refresh-tested-matrix.sh`.  ",
+            f"Test date: {generated_date}",
+            "",
+            "Test environment:",
+            "",
+            *environment_lines,
+            "",
+            "Pass criteria:",
+            "",
+            "- `Passed`: `./build.sh --source <spec> --python <matching-python> --skip-archive --clean-output` succeeds",
+            "- and the automatic `localhost -m ping` self-test succeeds",
+            "",
+            "Note: the official PyPI package name is still `ansible-base` for `2.10`; it changes to `ansible-core` starting from `2.11`.",
+            "",
+            "| Minor | Package | Final patch | Status | Test Python | Requires-Python | Official downloads |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
 
     for entry in entries:
         python_text = f"`{entry.python_version}`" if entry.python_version else "-"
         requires_python = f"`{entry.requires_python}`" if entry.requires_python else "-"
         lines.append(
-            f"| {entry.minor} | {entry.package} | {entry.version} | {entry.status} | {python_text} | {requires_python} | {_markdown_links(entry)} |"
+            f"| {entry.minor} | {entry.package} | {entry.version} | {_render_status(entry.status, language=language)} | {python_text} | {requires_python} | {_markdown_links(entry)} |"
         )
 
-    lines.extend(
-        [
-            "",
-            "补充说明：",
-            "",
-            f"- 最近一次执行的详细 JSON 结果会写到 `{results_json_display}`。",
-            "- 如果某一行不是 `已测通过`，准备好匹配的 Python 解释器后重新执行 `./refresh-tested-matrix.sh`。",
-        ]
-    )
+    if language == README_LANGUAGE_ZH_CN:
+        lines.extend(
+            [
+                "",
+                "补充说明：",
+                "",
+                f"- 最近一次执行的详细 JSON 结果会写到 `{results_json_display}`。",
+                "- 如果某一行不是 `已测通过`，准备好匹配的 Python 解释器后重新执行 `./refresh-tested-matrix.sh`。",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Additional notes:",
+                "",
+                f"- The detailed JSON result from the most recent run is written to `{results_json_display}`.",
+                "- If any row is not `Passed`, prepare a matching Python interpreter and rerun `./refresh-tested-matrix.sh`.",
+            ]
+        )
     lines.extend(_failure_notes(entries))
     return "\n".join(lines) + "\n"
 
@@ -526,7 +612,7 @@ def refresh_tested_matrix(args) -> MatrixRefreshResult:
                     minor=release.minor,
                     package=release.package,
                     version=release.version,
-                    status="缺少匹配 Python",
+                    status=STATUS_MISSING_PYTHON,
                     requires_python=release.requires_python,
                     python_version=None,
                     python_executable=None,
@@ -551,6 +637,7 @@ def refresh_tested_matrix(args) -> MatrixRefreshResult:
     _write_results_json(results_json_path, entries)
     if not args.skip_readme_update:
         readme_path = args.readme.resolve()
+        language = _detect_readme_language(readme_path)
         try:
             results_json_display = str(results_json_path.relative_to(readme_path.parent))
         except ValueError:
@@ -558,6 +645,7 @@ def refresh_tested_matrix(args) -> MatrixRefreshResult:
         matrix_body = _render_matrix_body(
             entries=entries,
             results_json_display=results_json_display,
+            language=language,
         )
         _replace_readme_section(readme_path, matrix_body)
 
